@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# made by tools/release.ps1 for each release
+build/release-notes.md
+# design previews (regenerate with the tools/ scripts)
+build/*preview*
+build/wordmark-weights.png

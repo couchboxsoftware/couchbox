@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: https://image.tmdb.org; media-src 'self' file: blob:; connect-src 'self' file: blob:; font-src 'self' file:" />
+  <title>Couchbox</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app"></div>
+  <div id="hovercard" class="hovercard" hidden></div>
+  <div id="modal-root"></div>
+  <div id="player" class="player" hidden></div>
+  <div id="statuspill" class="statuspill" hidden></div>
+  <div id="toast" class="toast" role="status"></div>
+  <div id="update-banner" class="update-banner" role="status" hidden></div>
+  <script src="brand.js"></script>
+  <script src="util.js"></script>
+  <script src="player.js"></script>
+  <script src="updates.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

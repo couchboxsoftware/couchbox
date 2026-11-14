@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: 'unsafe-inline'; style-src 'self' 'unsafe-inline'" />
+<title>Couchbox</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; cursor: default; }
+  body { -webkit-app-region: drag; transition: opacity 0.5s ease, transform 0.5s ease; }
+  body.out { opacity: 0; transform: scale(0.985); }
+  svg#s { display: block; width: 100vw; height: 100vh; animation: in 0.6s ease both; }
+  @keyframes in { from { opacity: 0; transform: scale(0.97); } }
+
+  .fill { opacity: 0; animation: fade 0.6s 0.15s ease forwards; }
+  .legs { opacity: 0; animation: fade 0.5s 0.8s ease forwards; }
+  .outline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.4s 0.1s cubic-bezier(.6,.1,.3,1) forwards; }
+  .outline.inner { animation-delay: 0.2s; }
+  #waves { opacity: 0; animation: fade 1.2s 0.6s ease forwards; }
+  .mark path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 0.9s 0.55s cubic-bezier(.6,.1,.3,1) forwards; }
+  .mark path:nth-child(2) { animation-delay: 0.7s; }
+  .mark path:nth-child(3) { animation-delay: 1.15s; animation-duration: 0.35s; }
+  .word { opacity: 0; animation: rise 0.7s 1.05s ease forwards; }
+  .track { opacity: 0; animation: fade 0.5s 1.3s ease forwards; }
+  #bar { transition: width 0.45s cubic-bezier(.3,.7,.3,1); }
+  @keyframes fade { to { opacity: 1; } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<!-- 320x180 design grid, drawn at 2x (640x360 window). Everything outside the sofa is transparent. -->
+<svg id="s" viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="sofa" d="M90 26h140a24 24 0 0 1 24 24v26h4a22 22 0 0 1 22 22v44a10 10 0 0 1-10 10H50a10 10 0 0 1-10-10V98a22 22 0 0 1 22-22h4V50a24 24 0 0 1 24-24z"/>
+    <clipPath id="clip"><use href="#sofa"/></clipPath>
+  </defs>
+  <g class="legs" fill="#0c0c0c" stroke="#E8743B" stroke-width="2">
+    <rect x="64" y="150" width="10" height="16" rx="2"/><rect x="246" y="150" width="10" height="16" rx="2"/>
+  </g>
+  <use href="#sofa" class="fill" fill="#0c0c0c"/>
+  <g id="waves" clip-path="url(#clip)" fill="none" stroke="#E8743B" stroke-linecap="round"></g>
+  <!-- double outline: a thick orange stroke with a thin dark line through the middle -->
+  <path class="outline" fill="none" stroke="#E8743B" stroke-width="6" pathLength="1" d="M90 26h140a24 24 0 0 1 24 24v26h4a22 22 0 0 1 22 22v44a10 10 0 0 1-10 10H50a10 10 0 0 1-10-10V98a22 22 0 0 1 22-22h4V50a24 24 0 0 1 24-24z"/>
+  <path class="outline inner" fill="none" stroke="#0c0c0c" stroke-width="2.4" pathLength="1" d="M90 26h140a24 24 0 0 1 24 24v26h4a22 22 0 0 1 22 22v44a10 10 0 0 1-10 10H50a10 10 0 0 1-10-10V98a22 22 0 0 1 22-22h4V50a24 24 0 0 1 24-24z"/>
+
+  <!-- logo, name and loading bar sit snugly together in the middle -->
+  <g class="mark" transform="translate(140.8 48) scale(0.8)" fill="none" stroke="#E8743B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" id="mark"></g>
+  <text class="word" x="160" y="101" text-anchor="middle" font-family="Segoe UI, sans-serif" font-weight="700" font-size="19" letter-spacing="1" fill="#eeeeee">couch<tspan fill="#E8743B">box</tspan></text>
+  <g class="track">
+    <rect x="122" y="110" width="76" height="1.6" rx="0.8" fill="#2a2a2a"/>
+    <rect id="bar" x="122" y="110" width="0" height="1.6" rx="0.8" fill="#E8743B"/>
+  </g>
+</svg>
+<script src="brand.js"></script>
+<script>
+  const NS = 'http://www.w3.org/2000/svg';
+  const mark = document.getElementById('mark');
+  for (const d of [BRAND.paths.back, BRAND.paths.body, BRAND.paths.legs]) {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('pathLength', '1');
+    mark.appendChild(p);
+  }
+
+  // Once a line has finished drawing itself on, drop the dash trick so there is no seam.
+  document.querySelectorAll('.outline, .mark path').forEach((p) =>
+    p.addEventListener('animationend', () => {
+      p.style.animation = 'none';
+      p.style.strokeDasharray = 'none';
+      p.style.strokeDashoffset = '0';
+    })
+  );
+
+  /* ---------- flowing contour lines ---------- */
+  // Two bands of wavy lines: a small one along the top of the backrest and a larger
+  // one across the seat. Both stay out of the middle block (logo, name, bar), which
+  // covers roughly y 58-112. Shapes are randomised every launch and ripple gently.
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const bands = [
+    { base: 34, gap: 6.5, lines: 2, amp: 3.6, maxY: 47 },    // top band, must stay above y 47
+    { base: 131, gap: 7.5, lines: 4, amp: 4.8, minY: 121 },  // seat band, must stay below y 121
+  ];
+  const layer = document.getElementById('waves');
+  const waves = [];
+  for (const band of bands) {
+    const f1 = rand(0.018, 0.03), f2 = rand(0.045, 0.07), tilt = rand(-0.012, 0.012);
+    const p1 = rand(0, 6.28), p2 = rand(0, 6.28), p3 = rand(0, 6.28), speed = rand(0.25, 0.4) * (Math.random() < 0.5 ? -1 : 1);
+    for (let i = 0; i < band.lines; i++) {
+      const el = document.createElementNS(NS, 'path');
+      el.setAttribute('stroke-width', '1');
+      el.setAttribute('opacity', (0.55 - i * (0.32 / band.lines)).toFixed(2));
+      layer.appendChild(el);
+      waves.push({ el, band, y0: band.base + i * band.gap, f1, f2, p1: p1 + i * 0.35, p2: p2 - i * 0.2, p3: p3 + i * 0.6, tilt, speed });
+    }
+  }
+  // Besides drifting sideways, each line slowly swells and settles (a ~10s "breath")
+  // and a long, lazy undulation rolls under it, so the shape keeps changing while loading.
+  function waveY(w, x, t) {
+    const breathe = 0.7 + 0.45 * Math.sin(t * 0.6 + w.p3);
+    let y = w.y0 + (x - 160) * w.tilt
+      + w.band.amp * breathe * Math.sin(x * w.f1 + w.p1 + t * w.speed)
+      + w.band.amp * 0.45 * Math.sin(x * w.f2 + w.p2 - t * w.speed * 1.6)
+      + w.band.amp * 0.5 * Math.sin(x * 0.011 + w.p3) * Math.sin(t * 0.45 + w.p2);
+    if (w.band.maxY != null) y = Math.min(y, w.band.maxY);
+    if (w.band.minY != null) y = Math.max(y, w.band.minY);
+    return y;
+  }
+  function frame(now) {
+    const t = now / 1000;
+    for (const w of waves) {
+      let d = '';
+      for (let x = 30; x <= 290; x += 5) d += (x === 30 ? 'M' : 'L') + x + ' ' + waveY(w, x, t).toFixed(2);
+      w.el.setAttribute('d', d);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ---------- progress, driven by the app as it starts ---------- */
+  const TOTAL = 6;
+  let done = 0;
+  const bar = document.getElementById('bar');
+  const setBar = (n) => bar.setAttribute('width', (76 * Math.min(1, n / TOTAL)).toFixed(2));
+  window.step = () => setBar(++done);
+  window.finish = () => setBar((done = TOTAL));
+  window.fadeOut = () => document.body.classList.add('out');
+  step();
+</script>
+</body>
+</html>
