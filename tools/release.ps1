@@ -62,8 +62,12 @@ try {
     Get-ChildItem $dist -File | Where-Object { $_.Name -match '^Couchbox[- ].*\.(exe|blockmap)$' -or $_.Name -eq 'latest.yml' } | Remove-Item -Force
     foreach ($f in $files) { Copy-Item (Join-Path 'dist' $f) $dist -Force }
 
-    # 5. Upload, attach the notes, and check all four files arrived.
+    # 5. Upload the source first (so the release tag points at this version's code), then the
+    #    files, attach the notes, and check all four files arrived.
     if (-not $NoPublish) {
+      $msg = if ($Notes) { "Couchbox $version`n`n$($Notes.Trim())" } else { "Couchbox $version" }
+      node (Join-Path $root 'tools\push-source.js') $msg
+      if ($LASTEXITCODE) { throw 'Uploading the source code failed (see the output above).' }
       $publishArgs = @('electron-builder', 'publish', '--version', $version, '--policy', 'always')
       foreach ($f in $files) { $publishArgs += @('-f', (Join-Path 'dist' $f)) }
       npx @publishArgs
