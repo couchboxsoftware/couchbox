@@ -1,6 +1,6 @@
 <#
   Builds Couchbox and (unless -NoPublish) publishes it to GitHub Releases, so every installed
-  copy offers "Update now".
+  copy offers "Update now". The matching source code is uploaded to the repo's main branch too.
 
   Examples:
     powershell -File tools\release.ps1 -NoPublish                 # build the current version into dist\ only
@@ -27,7 +27,7 @@ if (Test-Path $node) { $env:PATH = "$node;$env:PATH" }
 if (-not $NoPublish) {
   if (-not $env:GH_TOKEN) { $env:GH_TOKEN = [Environment]::GetEnvironmentVariable('GH_TOKEN', 'User') }
   if (-not $env:GH_TOKEN) {
-    throw 'No GitHub token found. Add a user environment variable called GH_TOKEN (see "Publishing an update" in the README), then open a new terminal and try again.'
+    throw 'No GitHub token found. Add a user environment variable called GH_TOKEN (see "Publishing an update" in the README), then try again.'
   }
 }
 
@@ -35,7 +35,8 @@ Push-Location $root
 try {
   # 2. Version and release notes.
   if ($Bump -ne 'none') { npm version $Bump --no-git-tag-version | Out-Null; if ($LASTEXITCODE) { throw 'npm version failed' } }
-  $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+  $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+  $version = $pkg.version
   if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Version '$version' must be three numbers, like 0.3.1." }
   $notesFile = Join-Path $root 'build\release-notes.md'
   if ($Notes) { [IO.File]::WriteAllText($notesFile, $Notes.Trim() + "`n", (New-Object Text.UTF8Encoding $false)) }
@@ -68,12 +69,12 @@ try {
       $msg = if ($Notes) { "Couchbox $version`n`n$($Notes.Trim())" } else { "Couchbox $version" }
       node (Join-Path $root 'tools\push-source.js') $msg
       if ($LASTEXITCODE) { throw 'Uploading the source code failed (see the output above).' }
+
       $publishArgs = @('electron-builder', 'publish', '--version', $version, '--policy', 'always')
       foreach ($f in $files) { $publishArgs += @('-f', (Join-Path 'dist' $f)) }
       npx @publishArgs
       if ($LASTEXITCODE) { throw 'The upload failed (see the output above).' }
 
-      $pkg = Get-Content package.json -Raw | ConvertFrom-Json
       $api = "https://api.github.com/repos/$($pkg.build.publish.owner)/$($pkg.build.publish.repo)"
       $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; 'User-Agent' = 'couchbox-release'; Accept = 'application/vnd.github+json' }
       $release = Invoke-RestMethod "$api/releases/tags/v$version" -Headers $headers

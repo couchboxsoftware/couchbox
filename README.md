@@ -4,10 +4,12 @@ A streaming-style player for the films and series on your own computer.
 
 ## Install
 
-- `dist/Couchbox-Setup-0.3.0.exe` installs Couchbox with a Start menu and desktop shortcut. The installed app updates itself (see below).
-- `dist/Couchbox-Portable-0.3.0.exe` runs without installing. Handy on a USB stick. It starts more slowly than the installed version, because Windows unpacks it each time before the splash appears. It can't update itself: when there's a new version it offers to open the download page.
+Download the latest version from the [Releases page](https://github.com/couchboxsoftware/couchbox/releases/latest):
 
-Windows may show "Windows protected your PC" the first time, because the app isn't code-signed. Click **More info**, then **Run anyway**.
+- `Couchbox-Setup-<version>.exe` installs Couchbox with a Start menu and desktop shortcut. The installed app updates itself (see below).
+- `Couchbox-Portable-<version>.exe` runs without installing. Handy on a USB stick. It starts more slowly than the installed version, because Windows unpacks it each time before the splash appears. It can't update itself: when there's a new version it offers to open the download page.
+
+Couchbox isn't code-signed, so Windows may show "Windows protected your PC" the first time, and some antivirus apps scan it before it opens. Click **More info**, then **Run anyway**.
 
 ## Updates
 
@@ -15,14 +17,11 @@ A few seconds after it starts (and every 6 hours while it's open), Couchbox chec
 
 ### Publishing an update
 
-New versions go to the GitHub repo named under `"publish"` in `package.json`.
-
 **One-time setup: a GitHub token**
 
 1. On GitHub, open **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
-2. Under **Repository access**, choose **Only select repositories** and pick `couchbox`. Under **Permissions → Repository permissions**, set **Contents** to **Read and write**. Pick an expiry date, then generate the token and copy it.
-3. Save it as a Windows user variable, so you never have to paste it into a terminal: press Start, type **environment variables**, open **Edit environment variables for your account**, click **New**, use the name `GH_TOKEN` and paste the token as the value, then click **OK**.
-4. Close and reopen any terminals (and Claude) so they can see the new variable.
+2. Under **Repository access**, choose **Only select repositories** and pick `couchbox`. Under **Repository permissions**, set **Contents** to **Read and write**.
+3. Save it as a Windows user variable called `GH_TOKEN`: press Start, type **environment variables**, open **Edit environment variables for your account**, click **New**, then **OK** in both windows.
 
 **Each release**
 
@@ -30,11 +29,11 @@ New versions go to the GitHub repo named under `"publish"` in `package.json`.
 powershell -File tools\release.ps1 -Bump patch -Notes "Added an Open folder button in Settings."
 ```
 
-This raises the version (`-Bump patch`: 0.3.0 → 0.3.1; `-Bump minor`: 0.3.x → 0.4.0), saves the notes, builds the installer and portable exe from a short folder path, uploads them with `latest.yml` to a GitHub release named after the version, and leaves a copy of just that version in `dist\`. The notes appear in the in-app update banner. Add `-NoPublish` to build without uploading.
+This raises the version (`-Bump patch`: 0.3.0 → 0.3.1; `-Bump minor`: 0.3.x → 0.4.0), builds the installer and portable exe from a short folder path, uploads the matching source to `main`, then uploads the exes, `latest.yml` and blockmap to a GitHub release named after the version, attaches the notes and checks all four files arrived. A copy of just that version is left in `dist\`. The notes appear in the in-app update banner. Add `-NoPublish` to build without uploading anything.
 
 Couchbox is pre-release, so versions stay below 1.0: small updates go `0.3.0` → `0.3.1` → `0.3.2`, and bigger ones `0.3.x` → `0.4.0`. Installed copies only offer an update when the number is higher than theirs, so never publish a `1.x` until you mean to leave 0.x behind.
 
-The repo has to be public so installed copies can read its releases without a password. Each release also uploads the matching source code to the repo's `main` branch (`node tools/push-source.js "message"` does this on its own; `--dry-run` lists what would go up). Build output, `node_modules` and design previews are left out.
+The repo has to be public so installed copies can read its releases without a password. `node tools/push-source.js "message"` uploads the source on its own (`--dry-run` lists what would go up). Build output, `node_modules` and design previews are left out.
 
 ## Folder layout
 
@@ -86,6 +85,8 @@ Keyboard in the player: Space play/pause, Left/Right skip 10s, Up/Down volume, F
 ## Licence
 
 Couchbox is open source under the [MIT licence](LICENSE). Copyright (c) 2026 Couchbox Software.
+
+Couchbox bundles [FFmpeg](https://ffmpeg.org/) (via [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static)) to convert videos the player can't play. FFmpeg is licensed separately under the GPL; its licence and build details ship next to `ffmpeg.exe` in the app folder, and its source is available from ffmpeg.org. Couchbox is built with [Electron](https://www.electronjs.org/) (MIT).
 
 ## Building from source
 

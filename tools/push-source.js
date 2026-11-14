@@ -60,11 +60,13 @@ async function main() {
   const newTree = await api('POST', '/git/trees', { tree });
   if (newTree.sha === head.tree.sha) {
     console.log('Source on GitHub is already up to date.');
+    console.log(`COMMIT=${head.sha}`);
     return;
   }
   const commit = await api('POST', '/git/commits', { message, tree: newTree.sha, parents: [head.sha] });
   await api('PATCH', `/git/refs/heads/${branch}`, { sha: commit.sha });
   console.log(`Pushed ${files.length} files to ${owner}/${repo} (${branch}): ${commit.html_url}`);
+  console.log(`COMMIT=${commit.sha}`); // read by tools/release.ps1
 }
 
 main().catch((e) => {
