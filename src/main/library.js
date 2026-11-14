@@ -287,6 +287,7 @@ class Library {
         certification: t.certification || '',
         kidsSafe: !!t.kidsSafe,
         matched: !!t.tmdbId,
+        imported: !!f.imported,
         poster: url(t.poster),
         backdrop: url(t.backdrop) || ff.frame,
         ...ff,

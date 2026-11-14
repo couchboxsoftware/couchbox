@@ -58,6 +58,21 @@ Videos\
 - Episodes need `S01E02`-style numbers (or `1x02`), or must sit in a `Season 1` folder.
 - New files show up on their own while Couchbox is open.
 
+## Find videos
+
+**Settings → Find videos** searches your computer for videos and adds the ones you pick to your Couchbox folder. Kids profiles don't see it.
+
+1. Choose where to look: the whole computer, Videos, Downloads, Desktop, or folders you add. Couchbox remembers this. Windows, program folders and the Couchbox folder itself are always skipped.
+2. Set the length (longer than 20 minutes by default) and the file types, then press **Search**.
+3. Each video is checked against TMDB:
+   - ✓ green, ticked: recognised and new to Couchbox.
+   - ! yellow, ticked: recognised, but more than 30 seconds longer or shorter than a copy you already have, so possibly a different version (for example an extended cut).
+   - – grey, unticked: not recognised.
+   - Greyed out: already in Couchbox (the same film or episode within 30 seconds of the same length, or the exact same file), or another copy of something in the list. Only the best copy (highest resolution, then largest file) can be added; **Use this copy** picks a different one.
+4. Press **Add selected** and choose **Copy** (originals stay) or **Move** (originals are moved; each is copied and checked before the original is removed).
+
+Where added videos go: recognised films to `Films\Title (Year)`, episodes to `Series\Show\Season 01\Show - S01E02`, other lengths with the length added to the name, and unrecognised videos to `Imported\` (their own row on the home screen). Subtitles with the same name go with their video. Nothing is ever overwritten: a clash is skipped and listed in the summary. You need a TMDB key for the ticks; without one, everything is listed unrecognised.
+
 ## Posters and descriptions (TMDB)
 
 1. Make a free account at themoviedb.org.
@@ -76,7 +91,10 @@ If a title gets the wrong poster, open it and click **Fix match**.
 - Skip intro: in the player, click the gear and mark where the intro starts and ends. It then applies to every episode of that series.
 - Files the built-in player can't handle (AVI, WMV, AC3 or DTS audio, and so on) can be converted once with the bundled FFmpeg. The original file isn't changed.
 
-Keyboard in the player: Space play/pause, Left/Right skip 10s, Up/Down volume, F full screen, M mute, N next episode, S skip intro, Esc back.
+- If the Couchbox window is maximised when you press Play, the video plays full screen. Full screen stays on when you leave the video; leave it with Esc (when nothing else is open), F11 or the button next to search.
+- Next episode: a card appears 30 seconds before the end. With autoplay on, a 5-second countdown starts at 20 seconds left and the next episode begins at 15 seconds left; the one you were watching counts as watched. **Watch credits** or **Cancel** stops it, and the countdown then runs at the very end instead. Skipping straight into the last 15 seconds shows the card without jumping.
+
+Keyboard in the player: Space play/pause, Left/Right skip 10s, Up/Down volume, F full screen, M mute, N next episode, S skip intro, Esc back. F11 switches full screen anywhere.
 
 ## Where data is kept
 
@@ -100,7 +118,7 @@ powershell -File tools\release.ps1 -NoPublish   # build the .exe files into dist
 
 `npm run dist` also builds, but fails with "could not open file" errors when the project folder's path is long; `tools\release.ps1` avoids that by building from a short temporary folder.
 
-`test/snap.js` drives the real app against a folder of videos and saves screenshots. `test/update-check.js` serves a built installer from a local stand-in release server and walks through the update banner, stopping just before it would install.
+`test/snap.js` drives the real app against a folder of videos and saves screenshots. `test/player-check.js` checks auto full screen, Esc/F11/the exit button and the next-episode timings. `test/finder-check.js` runs Find videos against a throwaway test folder (new films, copies, versions, files already in the library, a name clash, Copy, Move and Stop). `test/update-check.js` serves a built installer from a local stand-in release server and walks through the update banner, stopping just before it would install.
 
 The logo (a line-drawn sofa), the app icon and the bold `couchbox` wordmark are defined in `renderer/brand.js`. After editing it, run `node_modules\electron\dist\electron.exe tools/render-icon.js` to regenerate `build/icon.png` and `build/icon-preview.png`.
 

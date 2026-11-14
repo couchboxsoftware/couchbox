@@ -112,6 +112,9 @@ async function boot() {
   });
   cb.onStatus(showStatus);
   showStatus(S.model.status || { phase: 'idle' });
+  // body.is-full shows the "exit full screen" button in the top bar and lets Esc leave fullscreen.
+  cb.onFullscreen((on) => document.body.classList.toggle('is-full', on));
+  cb.windowState().then((w) => document.body.classList.toggle('is-full', w.fullscreen));
   Updates.init();
   render();
   setTimeout(() => cb.ready(), 0); // the window is still hidden here, so no rAF
@@ -319,6 +322,7 @@ function renderBrowse(app) {
     <nav class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.tab === k && !S.query ? 'active' : ''}" data-act="tab" data-tab="${k}">${l}</button>`).join('')}</nav>
     <div class="nav-right">
       <label class="searchbox ${S.query ? 'open' : ''}" id="searchbox">${ICON.search}<input id="search" placeholder="Titles, episodes, genres" value="${esc(S.query)}" spellcheck="false" /></label>
+      <button class="exit-full" data-act="exit-full" aria-label="Exit full screen" title="Exit full screen (Esc)">${ICON.unfull}</button>
       ${S.profile.kids ? '<span class="badge" style="border-color:var(--accent);color:var(--accent)">KIDS</span>' : ''}
       <button class="profile-menu-btn" data-act="profile-menu" aria-label="Profile menu">${avatarHTML(S.profile)}${ICON.down}</button>
     </div>
@@ -429,7 +433,8 @@ function renderContent(keepScroll = false) {
       rows += rowHTML('new', 'Recently added', [...pool].sort(newest).slice(0, 24));
       if (!kind) {
         rows += rowHTML('series', 'Series', vis.filter((i) => i.kind === 'series').sort(az));
-        rows += rowHTML('films', 'Films', vis.filter((i) => i.kind === 'film').sort(az));
+        rows += rowHTML('films', 'Films', vis.filter((i) => i.kind === 'film' && !i.imported).sort(az));
+        rows += rowHTML('imported', 'Imported', vis.filter((i) => i.imported).sort(newest));
       }
       rows += genreRows(pool, (kind || 'all') + ':');
       if (kind) rows += rowHTML('az', kind === 'film' ? 'All films A to Z' : 'All series A to Z', [...pool].sort(az));
@@ -763,12 +768,26 @@ function openFixMatch(id) {
 }
 
 /* ---------- settings ---------- */
-function openSettings(err) {
+function openSettings(err, tab = 'general') {
   hideHover();
   S.details = null;
   const st = S.settings;
+  // Kids profiles don't get "Find videos": it lists every video on the computer.
+  const canFind = !(S.profile && S.profile.kids);
+  if (!canFind) tab = 'general';
+  const tabs = canFind
+    ? `<div class="stabs" role="tablist"><button role="tab" class="${tab === 'general' ? 'on' : ''}" data-act="settings-tab" data-tab="general">General</button><button role="tab" class="${tab === 'find' ? 'on' : ''}" data-act="settings-tab" data-tab="find">Find videos</button></div>`
+    : '';
+  if (tab === 'find') {
+    $('#modal-root').innerHTML = `<div class="overlay" data-close="1"><div class="dialog dialog-wide">
+      <h2 style="margin-bottom:14px">Settings</h2>${tabs}<div id="finder-host"></div>
+      <div class="row-btns" style="margin-top:16px"><button class="btn btn-sm btn-ghost" data-act="close-modal">Close</button></div>
+    </div></div>`;
+    FinderUI.open($('#finder-host'));
+    return;
+  }
   $('#modal-root').innerHTML = `<div class="overlay" data-close="1"><div class="dialog" style="width:min(640px,92vw)">
-    <h2 style="margin-bottom:22px">Settings</h2>
+    <h2 style="margin-bottom:${canFind ? 14 : 22}px">Settings</h2>${tabs}
     <div class="settings-section"><h3>Video folder</h3>
       <div class="path">${esc(st.libraryPath || 'Not set')}</div>
       <div class="inline"><button class="btn btn-sm btn-ghost" data-act="choose-folder">${ICON.folder}Change folder</button><button class="btn btn-sm btn-ghost" data-act="rescan">Rescan now</button>${st.libraryPath ? '<button class="btn btn-sm btn-ghost" data-act="open-folder">Open folder</button>' : ''}</div>
@@ -996,6 +1015,12 @@ document.addEventListener('click', async (e) => {
     case 'close-modal':
       closeModal();
       break;
+    case 'settings-tab':
+      openSettings(null, el.dataset.tab);
+      break;
+    case 'exit-full':
+      cb.fullscreen(false);
+      break;
     case 'fix-match':
       openFixMatch(id);
       break;
@@ -1053,7 +1078,9 @@ document.addEventListener('keydown', (e) => {
   if (Player.isOpen()) return;
   if (e.key === 'Escape') {
     if ($('#pmenu')) $('#pmenu').remove();
-    else if ($('#modal-root').innerHTML && !$('#modal-root .overlay[data-close=""]')) closeModal();
+    else if ($('#modal-root').innerHTML) {
+      if (!$('#modal-root .overlay[data-close=""]')) closeModal();
+    } else if (document.body.classList.contains('is-full')) cb.fullscreen(false); // nothing open: leave fullscreen
     hideHover();
   }
   if (e.key === 'Enter' && document.activeElement && document.activeElement.classList.contains('card')) openDetails(document.activeElement.dataset.id);

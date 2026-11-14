@@ -12,6 +12,8 @@ const films = {
   'night train': { year: 2019, poster: 'poster1', backdrop: 'backdrop1', cert: '15', genres: ['Thriller', 'Mystery'], overview: 'A night porter on a sleeper train finds a passenger who boarded but never got off.' },
   fernhill: { year: 2018, poster: 'poster3', backdrop: 'backdrop2', cert: 'PG', genres: ['Family', 'Drama'], overview: 'Two siblings spend one last summer on their grandmother\'s farm before it is sold.' },
   'paper moons': { year: 2021, poster: 'poster2', backdrop: 'backdrop2', cert: '12A', genres: ['Drama', 'Romance'], overview: 'A set designer and a stage magician fall out of love one show at a time.' },
+  // Only used by test/finder-check.js (a film that isn't in the sample library yet).
+  'harbour lights': { year: 2020, poster: 'poster3', backdrop: 'backdrop1', cert: '12A', genres: ['Drama'], overview: 'A lighthouse keeper\'s daughter comes home to a town that has moved on without her.' },
 };
 const shows = {
   'the long coast': { year: 2022, poster: 'poster2', backdrop: 'backdrop1', cert: '15', genres: ['Drama', 'Mystery'], overview: 'A fishing town keeps a secret for forty years, until a storm washes it ashore.' },

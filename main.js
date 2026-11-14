@@ -5,6 +5,7 @@ const { JsonStore } = require('./src/main/store');
 const { Library } = require('./src/main/library');
 const { Tmdb } = require('./src/main/tmdb');
 const updater = require('./src/main/updater');
+const { Finder } = require('./src/main/finder');
 
 if (process.env.COUCHBOX_DATA_DIR) app.setPath('userData', process.env.COUCHBOX_DATA_DIR);
 
@@ -12,6 +13,7 @@ let win = null;
 let store = null;
 let library = null;
 let updates = null;
+let finder = null;
 
 const send = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
@@ -65,6 +67,11 @@ function createWindow() {
   win.on('leave-full-screen', () => send('fullscreen', false));
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'i') win.webContents.toggleDevTools();
+    // F11 switches fullscreen on and off anywhere in the app.
+    if (input.type === 'keyDown' && input.key === 'F11' && !input.control && !input.alt) {
+      e.preventDefault();
+      win.setFullScreen(!win.isFullScreen());
+    }
   });
   // Never navigate the app window away; open web links in the browser.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -177,6 +184,12 @@ app.whenReady().then(() => {
   });
   library.setTmdbKey(getKey());
   library.setRoot(store.data.settings.libraryPath);
+  finder = new Finder({
+    getLibrary: () => library,
+    send,
+    // Never search the Couchbox folder itself or the app's own data (thumbnails, converted copies).
+    getExcluded: () => [library.root, dataDir, path.dirname(process.execPath)],
+  });
   splashStep('checking video folder', store.data.settings.libraryPath ? (library.root ? 'ok' : 'missing') : 'not set yet');
   createWindow();
   // Scan only once the window has loaded, so the scan doesn't hold up startup.
@@ -310,10 +323,65 @@ ipcMain.handle('library:open', async () => {
   return (await shell.openPath(dir)) ? "Windows couldn't open the folder." : '';
 });
 ipcMain.handle('fullscreen', (_e, on) => win.setFullScreen(!!on));
+ipcMain.handle('window:state', () => ({ maximized: win.isMaximized(), fullscreen: win.isFullScreen() }));
 ipcMain.handle('reveal', (_e, fileId) => {
   const f = library.findFile(fileId);
   if (f && fs.existsSync(f.file)) shell.showItemInFolder(f.file);
 });
+/* ---------- Find videos ---------- */
+const QUICK_PLACES = [
+  ['videos', 'Videos'],
+  ['downloads', 'Downloads'],
+  ['desktop', 'Desktop'],
+];
+
+function drives() {
+  const out = [];
+  for (let c = 67; c <= 90; c++) {
+    const d = String.fromCharCode(c) + ':\\';
+    try {
+      if (fs.existsSync(d)) out.push(d);
+    } catch (_) {}
+  }
+  return out;
+}
+
+ipcMain.handle('finder:places', () => {
+  const quick = QUICK_PLACES.map(([key, label]) => {
+    let p = null;
+    try {
+      p = app.getPath(key);
+    } catch (_) {}
+    return { key, label, path: p, exists: !!p && fs.existsSync(p) };
+  });
+  const last = store.data.settings.finderWhere || { whole: false, quick: ['videos', 'downloads', 'desktop'], folders: [] };
+  return { quick, drives: drives(), last, state: finder.state(), hasLibrary: !!library.root, hasTmdbKey: !!getKey() };
+});
+ipcMain.handle('finder:choose-folder', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Choose a folder to search', properties: ['openDirectory'] });
+  return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+});
+ipcMain.handle('finder:search', (_e, where, filters) => {
+  // Remember where to look (not the filters: those reset each time, as agreed).
+  store.data.settings.finderWhere = { whole: !!where.whole, quick: where.quick || [], folders: where.folders || [] };
+  store.save();
+  const roots = where.whole
+    ? drives()
+    : [...QUICK_PLACES.filter(([k]) => (where.quick || []).includes(k)).map(([k]) => app.getPath(k)), ...(where.folders || [])].filter((p) => p && fs.existsSync(p));
+  finder.search({ roots, ...filters }).catch((e) => console.error('[finder]', e));
+  return true;
+});
+ipcMain.handle('finder:stop', () => finder.stop());
+ipcMain.handle('finder:state', () => finder.state());
+ipcMain.handle('finder:select', (_e, ids, value) => finder.select(ids, value));
+ipcMain.handle('finder:use-copy', (_e, id) => finder.useCopy(id));
+ipcMain.handle('finder:plan', (_e, mode) => finder.plan(mode));
+ipcMain.handle('finder:add', (_e, mode) => finder.add(mode, (p) => send('finder-progress', p)));
+ipcMain.handle('finder:add-stop', () => finder.stopAdd());
+ipcMain.handle('finder:reveal', (_e, file) => {
+  if (file && fs.existsSync(file)) shell.showItemInFolder(file);
+});
+
 ipcMain.handle('update:state', () => updates.getState());
 ipcMain.handle('update:check', () => updates.check(true));
 ipcMain.handle('update:download', () => updates.download());

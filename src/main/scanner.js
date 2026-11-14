@@ -7,6 +7,7 @@ const VIDEO_EXT = new Set(['.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.wm
 const SUB_EXT = new Set(['.srt', '.vtt']);
 const FILM_ROOTS = /^(films?|movies?)$/i;
 const SERIES_ROOTS = /^(series|tv|tv ?shows?|shows?|box ?sets?)$/i;
+const IMPORTED_ROOT = /^imported$/i;
 const SEASON_DIR = /^(?:season|series|s)[ ._-]*(\d{1,3})$|^(specials?)$/i;
 const EP_PATTERNS = [
   /\bS(\d{1,3})[ ._-]*E(\d{1,4})(?:-?E\d{1,4})*/i,
@@ -128,10 +129,13 @@ function scanLibrary(root) {
 
     const inSeriesRoot = dirs.length > 0 && SERIES_ROOTS.test(dirs[0]);
     const inFilmRoot = dirs.length > 0 && FILM_ROOTS.test(dirs[0]);
+    // Imported\ holds videos added by "Find videos" that TMDB didn't recognise. They're
+    // treated as films and get their own row on the home screen.
+    const inImportedRoot = dirs.length > 0 && IMPORTED_ROOT.test(dirs[0]);
     const ep = episodeInfo(fileName);
     const seasonDirIdx = dirs.findIndex((d) => SEASON_DIR.test(d));
 
-    const isEpisode = !inFilmRoot && (inSeriesRoot || seasonDirIdx >= 0 || (ep && /S\d|\dx\d/i.test(fileName)));
+    const isEpisode = !inFilmRoot && !inImportedRoot && (inSeriesRoot || seasonDirIdx >= 0 || (ep && /S\d|\dx\d/i.test(fileName)));
 
     if (isEpisode) {
       let showName = null;
@@ -177,7 +181,7 @@ function scanLibrary(root) {
       });
     } else {
       const parent = dirs.length ? dirs[dirs.length - 1] : null;
-      const useFolder = parent && !FILM_ROOTS.test(parent) && videosPerDir.get(path.dirname(file)) === 1;
+      const useFolder = parent && !FILM_ROOTS.test(parent) && !IMPORTED_ROOT.test(parent) && videosPerDir.get(path.dirname(file)) === 1;
       const parsed = parseTitleYear(useFolder ? parent : path.basename(fileName, path.extname(fileName)));
       films.push({
         id: 'film:' + rel.toLowerCase(),
@@ -189,6 +193,7 @@ function scanLibrary(root) {
         mtime: stat.mtimeMs,
         added,
         subs,
+        imported: inImportedRoot,
       });
     }
   }

@@ -3,6 +3,8 @@ const Player = (() => {
   let root, video, scrub, canvas, st = null;
   let idleTimer = null, saveTimer = null, clickTimer = null, countdown = null;
   let isFull = false;
+  // Seconds before the end of an episode: card appears / countdown starts / next one plays.
+  const NEXT_CARD_AT = 30, NEXT_COUNT_AT = 20, NEXT_PLAY_AT = 15;
   let blobs = [];
   let scrubBusy = false, scrubWant = null;
 
@@ -112,6 +114,11 @@ const Player = (() => {
     root.hidden = false;
     st = { file, series, onClose, dismissedNext: false, triedConvert: false };
     load(file, startAt);
+    // Pressing Play with Couchbox maximised plays fullscreen. Next episodes don't re-check:
+    // they keep whatever the player is in.
+    cb.windowState().then((w) => {
+      if (st && w.maximized && !w.fullscreen) cb.fullscreen(true);
+    });
   }
 
   function load(file, startAt) {
@@ -119,6 +126,8 @@ const Player = (() => {
     st.startAt = startAt || 0;
     st.dismissedNext = false;
     st.ended = false;
+    st.card = null; // which next-episode card is showing: null, 'plain' or 'count'
+    st.advancing = false;
     clearCountdown();
     hideOverlay();
     q('.next-card').hidden = true;
@@ -221,7 +230,7 @@ const Player = (() => {
     if (st.converting) cb.cancelConvert(st.file.id);
     st = null;
     root.hidden = true;
-    if (isFull) cb.fullscreen(false);
+    // Fullscreen stays on after the video: leave it with Esc, F11 or the top-bar button.
     done && done();
   }
 
@@ -250,11 +259,37 @@ const Player = (() => {
     const intro = st.series && S.intros[st.series.id];
     q('.skip-intro').hidden = !(intro && intro.end > intro.start && t >= intro.start && t < intro.end - 1);
 
+    // Next episode: the card appears with 30 s left; with autoplay on, a 5 s countdown runs from
+    // 20 s left and the next episode starts at 15 s left (the episode counts as watched).
+    // The countdown follows the video's own clock, so pausing pauses it too.
     const next = st.series && nextEpisode(st.series, st.file);
     const nc = q('.next-card');
-    if (next && d > 90 && d - t <= 20 && !st.dismissedNext) {
-      if (nc.hidden) showNextCard(next, false);
-    } else if (!countdown && !nc.hidden) nc.hidden = true;
+    const left = d - t;
+    if (next && d > 90 && left <= NEXT_CARD_AT && !st.dismissedNext && !st.ended) {
+      // Skipping straight into the last 15 s shows the plain card instead (no instant jump);
+      // the usual 5 s countdown then runs at the very end.
+      if (S.settings.autoplayNext && left <= NEXT_COUNT_AT && (st.card === 'count' || left > NEXT_PLAY_AT)) {
+        if (st.card !== 'count') {
+          showNextCard(next, true);
+          st.card = 'count';
+        }
+        const span = NEXT_COUNT_AT - NEXT_PLAY_AT;
+        const bar = q('.next-card .count');
+        const secs = q('.next-card .secs');
+        if (bar) bar.style.width = Math.min(100, Math.max(0, ((NEXT_COUNT_AT - left) / span) * 100)) + '%';
+        if (secs) secs.textContent = Math.max(0, Math.ceil(left - NEXT_PLAY_AT));
+        if (left <= NEXT_PLAY_AT && !st.advancing) {
+          st.advancing = true;
+          goNext(true);
+        }
+      } else if (st.card !== 'plain') {
+        showNextCard(next, false);
+        st.card = 'plain';
+      }
+    } else if (!countdown && !nc.hidden) {
+      nc.hidden = true;
+      st.card = null;
+    }
   }
 
   function drawBuffer() {
@@ -319,9 +354,11 @@ const Player = (() => {
     if (intro) video.currentTime = intro.end;
   }
 
-  function goNext() {
+  // markWatched: the episode was cut short by the early autoplay, so record it as finished.
+  function goNext(markWatched = false) {
     const next = st.series && nextEpisode(st.series, st.file);
     if (!next) return;
+    if (markWatched) st.ended = true;
     save();
     const p = S.progress[next.id];
     load(next, p && !isWatched(p) && p.t > 30 ? p.t - 3 : 0);
@@ -523,8 +560,8 @@ const Player = (() => {
     if (k === 'Escape') {
       handled();
       if (root.querySelector('.p-pop')) return closePops();
-      if (isFull) return cb.fullscreen(false);
-      return close();
+      return close(); // leaves the video; fullscreen stays on
+
     }
     if (!q('.p-overlay').hidden) return;
     if (e.target && e.target.tagName === 'INPUT' && e.target.type !== 'range') return;

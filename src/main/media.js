@@ -33,13 +33,16 @@ async function probe(file) {
   const { err } = await run(['-hide_banner', '-i', file]);
   const d = err.match(/Duration: (\d+):(\d+):([\d.]+)/);
   const v = err.match(/Stream #\d+:\d+[^:]*: Video: (\w+)/);
+  const res = err.match(/Stream #\d+:\d+[^:]*: Video: [^\n]*?, (\d{2,5})x(\d{2,5})/);
   const audio = [...err.matchAll(/Stream #\d+:\d+[^:]*: Audio: (\w+)/g)].map((m) => m[1]);
   const duration = d ? hms(d[1], d[2], d[3]) : 0;
   const videoCodec = v ? v[1] : null;
   const ext = path.extname(file).toLowerCase();
   const audioOk = audio.length === 0 || PLAY_AUDIO.has(audio[0]);
   const playable = PLAY_CONTAINERS.has(ext) && !!videoCodec && PLAY_VIDEO.has(videoCodec) && audioOk;
-  return { duration, videoCodec, audioCodec: audio[0] || null, playable };
+  const width = res ? parseInt(res[1], 10) : 0;
+  const height = res ? parseInt(res[2], 10) : 0;
+  return { duration, videoCodec, audioCodec: audio[0] || null, playable, width, height };
 }
 
 async function grabFrame(file, atSeconds, outFile, width = 480) {
