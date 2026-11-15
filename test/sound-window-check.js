@@ -94,12 +94,12 @@ app.on('browser-window-created', (_e, win) => {
         await js(`Player.close(); closeModal()`);
         await wait(500);
 
-        // Settings: the Sounds and "When Couchbox opens" sections.
-        await js(`openSettings()`);
+        // Settings, App tab: the Sounds and "When Couchbox opens" sections.
+        await js(`openSettings(null, 'app')`);
         await wait(500);
         check('Settings has Opening sounds, Click sounds for Sam and Volume', await js(`!!document.querySelector('[data-setting="openingSounds"]') && /Click sounds for Sam/.test(document.querySelector('.dialog').innerText) && !!document.getElementById('set-sound-vol')`));
         check('Settings has the four "When Couchbox opens" choices, Window selected', await js(`document.querySelectorAll('input[name="open-mode"]').length === 4 && document.querySelector('input[name="open-mode"]:checked').value === 'window'`));
-        await js(`document.querySelector('.settings-section:nth-of-type(4)') && document.querySelector('#set-sound-vol').scrollIntoView({block:'center'})`);
+        await js(`document.querySelector('#set-sound-vol').scrollIntoView({block:'center'})`);
         await wait(300);
         fs.writeFileSync(path.join(out, '50-settings-sounds.png'), (await win.webContents.capturePage()).toPNG());
         console.log('snap 50-settings-sounds');
@@ -118,7 +118,7 @@ app.on('browser-window-created', (_e, win) => {
         // Alex has clicks off from the start, Sam now too; turn Alex on and check per-profile.
         await js(`pickProfile('p2')`);
         await wait(1000);
-        await js(`openSettings()`);
+        await js(`openSettings(null, 'app')`);
         await wait(400);
         await js(`document.getElementById('set-clicks').click()`);
         await wait(600);
@@ -128,7 +128,7 @@ app.on('browser-window-created', (_e, win) => {
         await wait(300);
         check('Alex with clicks on: tap (each profile has its own setting)', (await taps()) === n + 1);
         // Opening sounds switch saves.
-        await js(`openSettings()`);
+        await js(`openSettings(null, 'app')`);
         await wait(400);
         await js(`document.querySelector('[data-setting="openingSounds"]').click()`);
         await wait(500);

@@ -213,7 +213,9 @@ img { display: block; }
 .hovercard .hc-progress .bar i { display: block; height: 100%; background: var(--accent); }
 
 /* ---------- modal (details) ---------- */
-.overlay { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, 0.72); overflow-y: auto; animation: fade 0.2s; }
+.overlay { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, 0.72); overflow-y: auto; scrollbar-gutter: stable both-edges; animation: fade 0.2s; }
+/* Switching Settings tabs redraws the dialog: no fade or rise each time. */
+.overlay.no-anim, .overlay.no-anim .dialog { animation: none; }
 .overlay::-webkit-scrollbar { width: 10px; }
 .overlay::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
 @keyframes fade { from { opacity: 0; } }
@@ -273,6 +275,7 @@ img { display: block; }
 .err { color: #ff6b5b; font-size: 13.5px; margin-top: 6px; }
 .row-btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 26px; }
 .toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid #2c2c2c; }
+.stabs + .settings-section > .toggle:first-child { border-top: 0; padding-top: 0; }
 .toggle .t-text b { display: block; font-weight: 600; }
 .toggle .t-text small { color: var(--text-3); }
 .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }

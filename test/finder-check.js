@@ -169,7 +169,7 @@ app.on('browser-window-created', (_e, win) => {
       await js(`document.querySelector('[data-pid="p3"]').click()`);
       await wait(800);
       await js(`openSettings()`);
-      check('kids profile: no Find videos tab', !(await js(`!!document.querySelector('.stabs')`)));
+      check('kids profile: no Find videos tab', !(await js(`!!document.querySelector('.stabs [data-tab="find"]')`)));
       await js(`closeModal()`);
     } catch (e) {
       console.error('TEST FAILED', e.message);

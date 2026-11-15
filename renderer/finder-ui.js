@@ -52,8 +52,8 @@ const FinderUI = (() => {
         <h3>File types</h3>
         <div class="f-types">${TYPES.map((t) => `<label class="f-check"><input type="checkbox" data-type="${t}" checked /> ${t.toUpperCase()}</label>`).join('')}</div>
         <div class="f-go" id="f-go"></div>
-        ${places.hasTmdbKey ? '' : '<p class="f-hint">No TMDB key is saved, so videos can\'t be recognised or pre-ticked. Add one in the General tab.</p>'}
-        ${places.hasLibrary ? '' : '<p class="f-hint">Choose your Couchbox video folder in the General tab before adding videos.</p>'}
+        ${places.hasTmdbKey ? '' : '<p class="f-hint">No TMDB key is saved, so videos can\'t be recognised or pre-ticked. Add one in the Library tab.</p>'}
+        ${places.hasLibrary ? '' : '<p class="f-hint">Choose your Couchbox video folder in the Library tab before adding videos.</p>'}
       </div>
       <div class="f-main">
         <div class="f-status" id="f-status"></div>

@@ -95,7 +95,8 @@ server.listen(0, '127.0.0.1', () => {
         await wait(200);
         console.log('after Later, banner hidden:', await js(`document.getElementById('update-banner').hidden`));
 
-        await js(`openSettings()`);
+        await js(`openSettings(null, 'app')`);
+        await js(`document.getElementById('settings-updates').scrollIntoView({block:'center'})`);
         await snap('23-settings-updates');
         await js(`document.querySelector('#settings-updates [data-ub="now"]').click(); closeModal()`);
         await until('download progress', `/Downloading/.test(document.getElementById('update-banner').innerText)`);

@@ -12,6 +12,7 @@ const S = {
   managing: false,
   featured: {},
   details: null, // { id, season }
+  settingsTab: null, // the Settings tab used last, until Couchbox closes
   pendingRender: false,
 };
 
@@ -817,26 +818,43 @@ function openFixMatch(id) {
 }
 
 /* ---------- settings ---------- */
-function openSettings(err, tab = 'general') {
+// Settings has four tabs: Library, Find videos, Playback and App. Kids profiles see only Playback
+// and App, so they can't change the folder, the TMDB key or what's in Couchbox. Settings reopens
+// on the last tab used (S.settingsTab), until Couchbox closes.
+const SETTINGS_TABS = [
+  ['library', 'Library'],
+  ['find', 'Find videos'],
+  ['playback', 'Playback'],
+  ['app', 'App'],
+];
+function settingsTabs() {
+  const kids = !!(S.profile && S.profile.kids);
+  return SETTINGS_TABS.filter(([k]) => !kids || k === 'playback' || k === 'app');
+}
+function openSettings(err, tab) {
   hideHover();
   S.details = null;
   const st = S.settings;
-  // Kids profiles don't get "Find videos": it lists every video on the computer.
-  const canFind = !(S.profile && S.profile.kids);
-  if (!canFind) tab = 'general';
-  const tabs = canFind
-    ? `<div class="stabs" role="tablist"><button role="tab" class="${tab === 'general' ? 'on' : ''}" data-act="settings-tab" data-tab="general">General</button><button role="tab" class="${tab === 'find' ? 'on' : ''}" data-act="settings-tab" data-tab="find">Find videos</button></div>`
-    : '';
+  const tabs = settingsTabs();
+  if (err) tab = 'library'; // a TMDB key problem: show it where the key is
+  if (!tab) tab = S.settingsTab;
+  if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
+  S.settingsTab = tab;
+  const bar = `<div class="stabs" role="tablist">${tabs
+    .map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" class="${k === tab ? 'on' : ''}" data-act="settings-tab" data-tab="${k}">${l}</button>`)
+    .join('')}</div>`;
+  const head = `<h2 style="margin-bottom:14px">Settings</h2>${bar}`;
+  const ov = `<div class="overlay${$('#modal-root .settings-dlg') ? ' no-anim' : ''}" data-close="1">`;
   if (tab === 'find') {
-    $('#modal-root').innerHTML = `<div class="overlay" data-close="1"><div class="dialog dialog-wide">
-      <h2 style="margin-bottom:14px">Settings</h2>${tabs}<div id="finder-host"></div>
+    $('#modal-root').innerHTML = `${ov}<div class="dialog dialog-wide settings-dlg">
+      ${head}<div id="finder-host"></div>
       <div class="row-btns" style="margin-top:16px"><button class="btn btn-sm btn-ghost" data-act="close-modal">Close</button></div>
     </div></div>`;
     FinderUI.open($('#finder-host'));
     return;
   }
-  $('#modal-root').innerHTML = `<div class="overlay" data-close="1"><div class="dialog" style="width:min(640px,92vw)">
-    <h2 style="margin-bottom:${canFind ? 14 : 22}px">Settings</h2>${tabs}
+  const body = {
+    library: `
     <div class="settings-section"><h3>Video folder</h3>
       <div class="path">${esc(st.libraryPath || 'Not set')}</div>
       <div class="inline"><button class="btn btn-sm btn-ghost" data-act="choose-folder">${ICON.folder}Change folder</button><button class="btn btn-sm btn-ghost" data-act="rescan">Rescan now</button>${st.libraryPath ? '<button class="btn btn-sm btn-ghost" data-act="open-folder">Open folder</button>' : ''}</div>
@@ -846,11 +864,13 @@ function openSettings(err, tab = 'general') {
       <div class="inline"><input class="input" id="set-key" placeholder="${st.hasTmdbKey ? 'Paste a new key to replace it' : 'Paste your TMDB key'}" spellcheck="false" /><button class="btn btn-sm btn-ghost" data-act="settings-save-key">Save</button></div>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
       <div class="inline" style="margin-top:10px">${st.hasTmdbKey ? '<button class="btn btn-sm btn-ghost" data-act="remove-key">Remove key</button><button class="btn btn-sm btn-ghost" data-act="refetch">Fetch all info again</button>' : ''}</div>
-    </div>
-    <div class="settings-section"><h3>Playback</h3>
+    </div>`,
+    playback: `
+    <div class="settings-section">
       <label class="toggle"><span class="t-text"><b>Autoplay next episode</b><small>Starts the next episode after a short countdown.</small></span><span class="switch"><input type="checkbox" data-setting="autoplayNext" ${st.autoplayNext ? 'checked' : ''} /><span></span></span></label>
       <label class="toggle"><span class="t-text"><b>Previews</b><small>Plays muted clips when you hover over a title or wait on the banner.</small></span><span class="switch"><input type="checkbox" data-setting="previews" ${st.previews ? 'checked' : ''} /><span></span></span></label>
-    </div>
+    </div>`,
+    app: `
     <div class="settings-section"><h3>Sounds</h3>
       <label class="toggle"><span class="t-text"><b>Opening sounds</b><small>An organ while Couchbox starts and a warm chord when it opens.</small></span><span class="switch"><input type="checkbox" data-setting="openingSounds" ${st.openingSounds ? 'checked' : ''} /><span></span></span></label>
       ${S.profile ? `<label class="toggle"><span class="t-text"><b>Click sounds for ${esc(S.profile.name)}</b><small>A quiet tap on buttons, tabs and cards. Each profile has its own setting.</small></span><span class="switch"><input type="checkbox" id="set-clicks" ${S.profile.clicks !== false ? 'checked' : ''} /><span></span></span></label>` : ''}
@@ -864,7 +884,10 @@ function openSettings(err, tab = 'general') {
         ['remember', 'Remember last', 'Opens exactly as you left it.'],
       ].map(([v, l, d]) => `<label class="open-mode"><input type="radio" name="open-mode" value="${v}" ${st.openMode === v ? 'checked' : ''} /><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
     </div>
-    <div class="settings-section"><h3>Updates</h3><div id="settings-updates"></div></div>
+    <div class="settings-section"><h3>Updates</h3><div id="settings-updates"></div></div>`,
+  }[tab];
+  $('#modal-root').innerHTML = `${ov}<div class="dialog settings-dlg" style="width:min(640px,92vw)">
+    ${head}${body}
     <div class="row-btns"><button class="btn btn-sm btn-accent" data-act="close-modal">Done</button></div>
   </div></div>`;
   Updates.renderSettings();
@@ -881,14 +904,16 @@ function openSettings(err, tab = 'general') {
       S.profile = S.profiles.find((p) => p.id === id);
     });
   const vol = $('#set-sound-vol');
-  const saveVol = debounce(async (v) => (S.settings = await cb.setSettings({ soundVolume: v })), 300);
-  vol.addEventListener('input', () => {
-    const v = Number(vol.value);
-    S.settings.soundVolume = v;
-    $('#set-sound-pct').textContent = Math.round(v * 100) + '%';
-    Sounds.play('tap', v); // a preview at the new level
-    saveVol(v);
-  });
+  if (vol) {
+    const saveVol = debounce(async (v) => (S.settings = await cb.setSettings({ soundVolume: v })), 300);
+    vol.addEventListener('input', () => {
+      const v = Number(vol.value);
+      S.settings.soundVolume = v;
+      $('#set-sound-pct').textContent = Math.round(v * 100) + '%';
+      Sounds.play('tap', v); // a preview at the new level
+      saveVol(v);
+    });
+  }
   $$('input[name="open-mode"]').forEach((r) =>
     r.addEventListener('change', async () => {
       if (r.checked) S.settings = await cb.setSettings({ openMode: r.value });
