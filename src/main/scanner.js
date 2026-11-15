@@ -14,7 +14,28 @@ const EP_PATTERNS = [
   /\b(\d{1,2})x(\d{2,3})\b/i,
 ];
 const EP_ONLY = /\b(?:episode|ep|e)[ ._-]*(\d{1,4})\b/i;
-const SKIP_DIRS = /^(\$recycle\.bin|system volume information|\.|@eadir|extras?|featurettes?|behind the scenes|trailers?)/i;
+// Season markers inside a show's folder name, as in downloaded "season packs":
+// "Desperate.Housewives.S01.1080p...", "Breaking Bad S01-S03", "Friends - Season 2",
+// "The Office Series 3", "Westworld Complete Series". Everything from the marker on is dropped
+// from the show's name, so all its seasons become one show.
+// "Complete" only counts when it means a full-series pack ("Complete Series", or "Complete" right
+// before the quality tags / at the end), so a show called "The Complete Guide…" keeps its name.
+const SEASON_MARK = /[ ._-]*(?:\bS\d{1,2}(?:[ ._-]*(?:-|to)[ ._-]*S?\d{1,2})?\b|\bSeasons?[ ._-]*\d{1,2}(?:[ ._-]*(?:-|to)[ ._-]*\d{1,2})?\b|\bSeries[ ._-]*\d{1,2}\b|\bComplete[ ._-]*(?:Series|Seasons?|Collection|Box[ ._-]*Set)\b|\bComplete\b(?=[ ._-]*(?:$|[\[(]|\d{3,4}p\b|(?:BluRay|WEB|HDTV|DVD|x26[45]|HEVC)\b))).*$/i;
+const SEASON_NUM = /\bS(\d{1,2})\b|\bSeason[ ._-]*(\d{1,2})\b|\bSeries[ ._-]*(\d{1,2})\b/i;
+
+function stripSeason(name) {
+  const m = SEASON_MARK.exec(name);
+  return m && m.index > 0 ? name.slice(0, m.index).replace(/[\s._\-([]+$/, '') : name;
+}
+
+// The season a pack folder holds ("Show.S02.720p" -> 2), if it names just one.
+function seasonOfFolder(name) {
+  if (/\bS\d{1,2}[ ._-]*(?:-|to)|Seasons?[ ._-]*\d{1,2}[ ._-]*(?:-|to)/i.test(name)) return null; // a range like S01-S03
+  const m = SEASON_NUM.exec(name);
+  return m ? parseInt(m[1] || m[2] || m[3], 10) : null;
+}
+
+const SKIP_DIRS =/^(\$recycle\.bin|system volume information|\.|@eadir|extras?|featurettes?|behind the scenes|trailers?)/i;
 const JUNK = /\b(2160p|1080p|720p|576p|480p|4k|uhd|hdr10?|dv|x\.?264|x\.?265|h\.?264|h\.?265|hevc|avc|bluray|blu-ray|brrip|bdrip|bdremux|remux|web[ .-]?dl|webrip|web|hdtv|dvdrip|dvd|aac\d?(\.\d)?|ac3|eac3|ddp?\d?(\.\d)?|dts(-hd)?|truehd|atmos|proper|repack|extended|remastered|unrated|directors? cut|10 ?bit|8 ?bit|multi|subbed|dubbed|nf|amzn|dsnp|hmax)\b.*$/i;
 
 function tidy(s) {
@@ -134,8 +155,10 @@ function scanLibrary(root) {
     const inImportedRoot = dirs.length > 0 && IMPORTED_ROOT.test(dirs[0]);
     const ep = episodeInfo(fileName);
     const seasonDirIdx = dirs.findIndex((d) => SEASON_DIR.test(d));
+    // A season-pack folder: "Show.S02.1080p..." (not a bare "Season 2" folder, handled above).
+    const packIdx = dirs.findIndex((d, i) => i >= (inSeriesRoot ? 1 : 0) && !SEASON_DIR.test(d) && stripSeason(d) !== d);
 
-    const isEpisode = !inFilmRoot && !inImportedRoot && (inSeriesRoot || seasonDirIdx >= 0 || (ep && /S\d|\dx\d/i.test(fileName)));
+    const isEpisode = !inFilmRoot && !inImportedRoot && (inSeriesRoot || seasonDirIdx >= 0 || (ep && /S\d|\dx\d/i.test(fileName)) || (packIdx >= 0 && !!ep));
 
     if (isEpisode) {
       let showName = null;
@@ -144,14 +167,19 @@ function scanLibrary(root) {
       else if (!inSeriesRoot && dirs.length > 0) showName = dirs[dirs.length - 1];
       if (!showName && ep && ep.showHint) showName = ep.showHint;
       if (!showName) showName = 'Unsorted episodes';
+      const legacyName = showName; // how earlier versions named it, for carrying settings over
+      showName = stripSeason(showName);
       const show = parseTitleYear(showName);
-      const showKey = show.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unsorted';
+      const keyOf = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unsorted';
+      const showKey = keyOf(show.title);
+      const legacyKey = keyOf(parseTitleYear(legacyName).title);
 
       let season = ep && ep.season != null ? ep.season : null;
       if (season == null && seasonDirIdx >= 0) {
         const sm = dirs[seasonDirIdx].match(SEASON_DIR);
         season = sm[2] ? 0 : parseInt(sm[1], 10);
       }
+      if (season == null && packIdx >= 0) season = seasonOfFolder(dirs[packIdx]);
       if (season == null) season = 1;
 
       if (!seriesMap.has(showKey)) {
@@ -162,10 +190,12 @@ function scanLibrary(root) {
           year: show.year,
           episodes: [],
           added: 0,
+          legacyIds: [], // ids older versions gave parts of this show (e.g. "...s01"), to carry settings over
         });
       }
       const s = seriesMap.get(showKey);
       s.added = Math.max(s.added, added);
+      if (legacyKey !== showKey && !s.legacyIds.includes('series:' + legacyKey)) s.legacyIds.push('series:' + legacyKey);
       s.episodes.push({
         id: 'ep:' + rel.toLowerCase(),
         kind: 'episode',
@@ -212,4 +242,4 @@ function scanLibrary(root) {
   return { films, series };
 }
 
-module.exports = { scanLibrary, parseTitleYear, episodeInfo, VIDEO_EXT };
+module.exports = { scanLibrary, parseTitleYear, episodeInfo, stripSeason, seasonOfFolder, VIDEO_EXT };

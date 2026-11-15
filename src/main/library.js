@@ -27,7 +27,8 @@ async function pool(items, n, fn) {
 }
 
 class Library {
-  constructor(dataDir, { onChange, onStatus }) {
+  constructor(dataDir, { onChange, onStatus, onMigrate }) {
+    this.onMigrate = onMigrate || (() => {});
     this.dataDir = dataDir;
     this.frameDir = path.join(dataDir, 'cache', 'frames');
     this.imageDir = path.join(dataDir, 'cache', 'images');
@@ -104,6 +105,7 @@ class Library {
     }
     this.setStatus({ phase: 'scanning' });
     this.scan = scanLibrary(this.root);
+    this.migrateIds();
     this.emit(true);
 
     const files = [...this.scan.films, ...this.scan.series.flatMap((s) => s.episodes)];
@@ -127,6 +129,24 @@ class Library {
     this.meta.save();
     this.setStatus({ phase: 'idle' });
     this.emit(true);
+  }
+
+  // Shows that earlier versions split by season folder ("…S01", "…S02") are now one show.
+  // Hand their old ids to main.js (My list, intro skip, kids setting) and tidy the metadata:
+  // a "Fix match" choice carries over; the old posters/info are dropped and fetched again.
+  migrateIds() {
+    const map = {};
+    for (const s of this.scan.series) for (const old of s.legacyIds || []) if (old !== s.id) map[old] = s.id;
+    if (!Object.keys(map).length) return;
+    const m = this.meta.data;
+    for (const [old, now] of Object.entries(map)) {
+      if (m.overrides[old] != null && m.overrides[now] == null) m.overrides[now] = m.overrides[old];
+      delete m.overrides[old];
+      delete m.titles[old];
+      delete m.seasons[old];
+    }
+    this.meta.save();
+    this.onMigrate(map);
   }
 
   async matchAll() {

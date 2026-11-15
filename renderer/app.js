@@ -112,6 +112,13 @@ async function boot() {
     scheduleRender();
   });
   cb.onStatus(showStatus);
+  // Shows merged from season folders: settings moved to the combined show (see main.js).
+  cb.onPrefsChanged(async (p) => {
+    S.intros = p.intros;
+    S.kidsAllow = p.kidsAllow || {};
+    if (S.profile) S.list = await cb.getList(S.profile.id);
+    scheduleRender();
+  });
   showStatus(S.model.status || { phase: 'idle' });
   // body.is-full shows the "exit full screen" button in the top bar and lets Esc leave fullscreen.
   cb.onFullscreen((on) => document.body.classList.toggle('is-full', on));

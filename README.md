@@ -56,6 +56,7 @@ Videos\
 
 - Put the year in brackets after a film's name to help TMDB pick the right film.
 - Episodes need `S01E02`-style numbers (or `1x02`), or must sit in a `Season 1` folder.
+- Downloaded season packs can stay as they are: folders like `Desperate.Housewives.S01.1080p…`, `Breaking Bad S01-S03`, `Friends - Season 2` or `Westworld Complete Series` all join one show, with each season in its own place.
 - New files show up on their own while Couchbox is open.
 
 ## Find videos
@@ -122,7 +123,7 @@ powershell -File tools\release.ps1 -NoPublish   # build the .exe files into dist
 
 `npm run dist` also builds, but fails with "could not open file" errors when the project folder's path is long; `tools\release.ps1` avoids that by building from a short temporary folder.
 
-`test/snap.js` drives the real app against a folder of videos and saves screenshots. `test/avatar-check.js` checks the picture cropper, saving, Cancel, Remove and clean-up. `test/sound-window-check.ps1` checks the sounds and every "When Couchbox opens" choice across several launches. All tests mute the app (`test/quiet.js`). `test/player-check.js` checks auto full screen, Esc/F11/the exit button and the next-episode timings. `test/finder-check.js` runs Find videos against a throwaway test folder (new films, copies, versions, files already in the library, a name clash, Copy, Move and Stop). `test/update-check.js` serves a built installer from a local stand-in release server and walks through the update banner, stopping just before it would install.
+`test/snap.js` drives the real app against a folder of videos and saves screenshots. `node test/season-folders-check.js` checks season-pack folder names, and `test/season-migrate-check.js` checks settings carry over when split shows merge. `test/avatar-check.js` checks the picture cropper, saving, Cancel, Remove and clean-up. `test/sound-window-check.ps1` checks the sounds and every "When Couchbox opens" choice across several launches. All tests mute the app (`test/quiet.js`). `test/player-check.js` checks auto full screen, Esc/F11/the exit button and the next-episode timings. `test/finder-check.js` runs Find videos against a throwaway test folder (new films, copies, versions, files already in the library, a name clash, Copy, Move and Stop). `test/update-check.js` serves a built installer from a local stand-in release server and walks through the update banner, stopping just before it would install.
 
 The logo (a line-drawn sofa), the app icon and the bold `couchbox` wordmark are defined in `renderer/brand.js`. After editing it, run `node_modules\electron\dist\electron.exe tools/render-icon.js` to regenerate `build/icon.png` and `build/icon-preview.png`.
 

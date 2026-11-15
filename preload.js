@@ -58,4 +58,5 @@ contextBridge.exposeInMainWorld('cb', {
   onConvertProgress: on('convert-progress'),
   onFullscreen: on('fullscreen'),
   onAppShown: on('app-shown'),
+  onPrefsChanged: on('prefs-changed'),
 });

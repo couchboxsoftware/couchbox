@@ -43,6 +43,34 @@ function setKey(key) {
   store.save();
 }
 
+/* ---------- shows merged from season folders ---------- */
+// map: { "series:desperate housewives s01": "series:desperate housewives", ... }. Moves My list
+// entries, intro-skip times and kids settings from the old split shows to the combined show.
+// Only touches entries that use an old id, so after the first time it changes nothing.
+function migrateShowIds(map) {
+  const d = store.data;
+  let changed = false;
+  for (const pid of Object.keys(d.lists || {})) {
+    const list = d.lists[pid];
+    if (!list.some((id) => map[id])) continue;
+    const seen = new Set();
+    d.lists[pid] = list.map((id) => map[id] || id).filter((id) => !seen.has(id) && seen.add(id));
+    changed = true;
+  }
+  for (const key of ['intros', 'kidsAllow']) {
+    const obj = d[key] || {};
+    for (const [old, now] of Object.entries(map)) {
+      if (!(old in obj)) continue;
+      if (!(now in obj)) obj[now] = obj[old];
+      delete obj[old];
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  store.save();
+  send('prefs-changed', { intros: d.intros, kidsAllow: d.kidsAllow });
+}
+
 /* ---------- how the window opens ---------- */
 // "When Couchbox opens": window (1400 x 860, centred), maximised, fullscreen (the default) or
 // remember (size, position, maximised and fullscreen as they were when the app last closed).
@@ -238,6 +266,7 @@ app.whenReady().then(() => {
       }
     },
     onStatus: (s) => send('status', s),
+    onMigrate: migrateShowIds,
   });
   library.setTmdbKey(getKey());
   library.setRoot(store.data.settings.libraryPath);
