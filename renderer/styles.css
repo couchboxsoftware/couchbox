@@ -493,3 +493,51 @@ body.is-full .exit-full { display: inline-flex; }
 .p-overlay .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width 0.4s; }
 .p-overlay .btns { display: flex; gap: 10px; justify-content: center; }
 .scrubber { display: none; }
+
+/* ---------- conversions ---------- */
+/* Converting: grey above an orange line that rises from the bottom; full colour below it.
+   Waiting: all grey. */
+.convov { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.convov .cv-grey { position: absolute; left: 0; right: 0; top: 0; backdrop-filter: grayscale(1) brightness(0.55); transition: height 0.7s linear; }
+.convov .cv-line { position: absolute; left: 0; right: 0; height: 3px; margin-bottom: -1.5px; background: var(--accent); box-shadow: 0 0 10px var(--accent); transition: bottom 0.7s linear; }
+.convov.wait .cv-grey { height: 100% !important; }
+.convov.wait .cv-line { display: none; }
+.convov span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 3px 9px; border-radius: 3px; background: rgba(0, 0, 0, 0.72); font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; white-space: nowrap; }
+.ep-thumb .convov span { font-size: 10.5px; padding: 2px 6px; }
+.ep-title .ep-conv { margin-left: auto; font-size: 12.5px; font-weight: 600; white-space: nowrap; color: var(--accent); }
+.ep-title .ep-conv.waiting, .ep-title .ep-conv.skipped { color: var(--text-3); }
+.ep-title .ep-conv.failed { color: #ff6b5b; }
+.ep-title .ep-conv.ready { color: var(--good); }
+.d-conv { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 14px; font-size: 14px; color: #ccc; }
+.d-conv b { color: var(--text); font-weight: 600; }
+.d-conv .bar { width: 200px; height: 4px; background: #444; border-radius: 2px; overflow: hidden; }
+.d-conv .bar i { display: block; height: 100%; background: var(--accent); transition: width 0.6s linear; }
+.d-conv.bad b { color: #ff6b5b; }
+
+/* The yellow "!" for anything that needs attention. */
+.warn-dot { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%; background: #f2c230; color: #1a1a1a; font-size: 12px; font-weight: 800; line-height: 1; flex: none; vertical-align: middle; margin-left: 6px; text-transform: none; letter-spacing: 0; }
+.profile-menu-btn { position: relative; }
+.profile-menu-btn .warn-dot { position: absolute; top: -7px; left: 30px; margin: 0; box-shadow: 0 0 0 2px var(--bg); }
+.menu button .warn-dot { margin-left: auto; }
+.warnbox { display: flex; gap: 10px; align-items: flex-start; background: rgba(242, 194, 48, 0.1); border: 1px solid rgba(242, 194, 48, 0.45); border-radius: var(--radius); padding: 12px 14px; margin: 0 0 12px; font-size: 14px; }
+.warnbox .warn-dot { margin: 2px 0 0; }
+.warnbox b { display: block; margin-bottom: 2px; }
+.warnbox p { margin: 0 0 8px; color: var(--text-2); }
+.warnbox p:last-child { margin-bottom: 0; }
+
+/* Settings -> Playback -> Conversions */
+.conv-sum { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid #2c2c2c; font-size: 14px; color: var(--text-2); }
+.conv-list { display: flex; flex-direction: column; }
+.conv-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid #242424; font-size: 14px; }
+.conv-row .cr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-row .cr-name small { display: block; color: var(--text-3); font-size: 12.5px; white-space: normal; }
+.conv-row .cr-tag { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line); color: var(--text-2); }
+.conv-row .cr-tag.slow { border-color: rgba(232, 116, 59, 0.6); color: var(--accent-2); }
+.conv-row .cr-bar { width: 120px; height: 4px; background: #3a3a3a; border-radius: 2px; overflow: hidden; }
+.conv-row .cr-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.6s linear; }
+.conv-row .cr-pct { width: 40px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.conv-row .cr-wait { color: var(--text-3); font-size: 13px; }
+.conv-row .btn-sm { padding: 4px 10px; font-size: 13px; }
+.conv-more { display: inline-block; margin: 8px 0 0; font-size: 13.5px; }
+#conv-section h4 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-3); margin: 18px 0 6px; }
+.conv-note { margin: 0 0 8px; font-size: 13.5px; color: var(--text-2); }

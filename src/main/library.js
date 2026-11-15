@@ -32,8 +32,10 @@ class Library {
     this.dataDir = dataDir;
     this.frameDir = path.join(dataDir, 'cache', 'frames');
     this.imageDir = path.join(dataDir, 'cache', 'images');
-    this.convertDir = path.join(dataDir, 'converted');
-    this.meta = new JsonStore(path.join(dataDir, 'metadata.json'), { files: {}, titles: {}, seasons: {}, overrides: {} });
+    // added: { path: time } keeps a converted file's original "added" time, so it doesn't show
+    // as NEW or jump the rows just because its file was rewritten.
+    this.meta = new JsonStore(path.join(dataDir, 'metadata.json'), { files: {}, titles: {}, seasons: {}, overrides: {}, added: {} });
+    if (!this.meta.data.added) this.meta.data.added = {};
     this.onChange = onChange;
     this.onStatus = onStatus;
     this.root = null;
@@ -42,7 +44,7 @@ class Library {
     this.running = null;
     this.again = false;
     this.watcher = null;
-    this.convertJobs = new Map();
+    this.afterRefresh = () => {}; // set by main.js: lets the converter look at the new scan
     this._emitTimer = null;
     this.status = { phase: 'idle' };
   }
@@ -55,7 +57,8 @@ class Library {
       try {
         let t;
         this.watcher = fs.watch(this.root, { recursive: true }, (_ev, name) => {
-          if (name && /\.(part|tmp|crdownload)$/i.test(name)) return;
+          // Downloads in progress, conversions in progress and the conversion bin aren't videos.
+          if (name && (/\.(part|tmp|crdownload)$/i.test(name) || /\.converting\.\w+$/i.test(name) || /^\.couchbox-bin\b/i.test(name))) return;
           clearTimeout(t);
           t = setTimeout(() => this.refresh(), 2500);
         });
@@ -105,6 +108,7 @@ class Library {
     }
     this.setStatus({ phase: 'scanning' });
     this.scan = scanLibrary(this.root);
+    this.applyAdded();
     this.migrateIds();
     this.emit(true);
 
@@ -117,18 +121,28 @@ class Library {
     if (toProbe.length) this.setStatus({ phase: 'reading', done, total: toProbe.length });
     await pool(toProbe, 3, async (f) => {
       const info = await media.probe(f.file);
-      const prev = this.meta.data.files[f.file] || {};
-      this.meta.data.files[f.file] = { ...info, size: f.size, mtime: f.mtime, converted: prev.size === f.size ? prev.converted : undefined };
+      this.meta.data.files[f.file] = { ...info, size: f.size, mtime: f.mtime };
       this.setStatus({ phase: 'reading', done: ++done, total: toProbe.length });
       this.emit();
     });
     this.meta.save();
+    this.afterRefresh(); // formats are known now: the converter can queue what won't play
 
     if (this.tmdb.enabled) await this.matchAll();
     await this.makeFrames();
     this.meta.save();
     this.setStatus({ phase: 'idle' });
     this.emit(true);
+  }
+
+  // Converted files keep the "added" time of the original they replaced.
+  applyAdded() {
+    const added = this.meta.data.added;
+    for (const f of this.scan.films) if (added[f.file]) f.added = added[f.file];
+    for (const s of this.scan.series) {
+      for (const e of s.episodes) if (added[e.file]) e.added = added[e.file];
+      s.added = Math.max(0, ...s.episodes.map((e) => e.added));
+    }
   }
 
   // Shows that earlier versions split by season folder ("…S01", "…S02") are now one show.
@@ -277,13 +291,11 @@ class Library {
 
   fileFields(f) {
     const info = this.meta.data.files[f.file] || {};
-    const playFile = info.converted && fs.existsSync(info.converted) ? info.converted : f.file;
     return {
       file: f.file,
-      video: url(playFile),
+      video: url(f.file),
       duration: info.duration || 0,
-      playable: info.converted ? true : info.playable !== false,
-      converted: !!info.converted,
+      playable: info.playable !== false,
       frame: url(info.frame),
       subs: f.subs.map((s, i) => ({ index: i, label: s.label })),
       added: f.added,
@@ -365,34 +377,19 @@ class Library {
     return s ? media.subtitleToVtt(s.file) : null;
   }
 
-  convert(fileId, onProgress) {
-    const f = this.findFile(fileId);
-    if (!f) return Promise.resolve(false);
-    if (this.convertJobs.has(fileId)) return this.convertJobs.get(fileId).promise;
-    const info = this.meta.data.files[f.file] || {};
-    const out = path.join(this.convertDir, hash(f.file + f.size) + '.mp4');
-    const job = media.convert(f.file, out, info, onProgress);
-    const promise = job.promise.then((ok) => {
-      this.convertJobs.delete(fileId);
-      if (ok) {
-        info.converted = out;
-        this.meta.data.files[f.file] = info;
-        this.meta.save();
-        this.emit(true);
-      }
-      return ok ? url(out) : null;
-    });
-    this.convertJobs.set(fileId, { promise, cancel: job.cancel });
-    return promise;
-  }
-
-  cancelConvert(fileId) {
-    const j = this.convertJobs.get(fileId);
-    if (j) j.cancel();
-  }
-
-  cancelAll() {
-    for (const j of this.convertJobs.values()) j.cancel();
+  // A short name for a file, for the conversion queue: "Fernhill (2018)" or "Desperate Housewives S1:E3".
+  labelFor(f) {
+    const titles = this.meta.data.titles;
+    if (f.kind === 'film') {
+      const t = titles[f.id] || {};
+      const title = t.title || f.title;
+      const year = t.year || f.year;
+      return year ? `${title} (${year})` : title;
+    }
+    const show = this.scan.series.find((s) => s.id === f.seriesId);
+    const t = (show && titles[show.id]) || {};
+    const code = f.season === 0 ? `Special ${f.episode}` : `S${f.season}:E${f.episode}`;
+    return `${t.title || (show && show.title) || 'Episode'} ${code}`;
   }
 }
 

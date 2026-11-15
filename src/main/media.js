@@ -45,6 +45,21 @@ async function probe(file) {
   return { duration, videoCodec, audioCodec: audio[0] || null, playable, width, height };
 }
 
+// Every stream in a file, for the converter: [{ type: 'video'|'audio'|'subtitle'|'attachment'|'data',
+// codec, channels }], plus the length. Reads the header only, like probe().
+async function streams(file) {
+  const { err } = await run(['-hide_banner', '-i', file]);
+  const d = err.match(/Duration: (\d+):(\d+):([\d.]+)/);
+  const list = [...err.matchAll(/Stream #\d+:\d+[^:]*: (Video|Audio|Subtitle|Attachment|Data): (\w+)([^\n]*)/g)].map((m) => {
+    const rest = m[3];
+    const ch = rest.match(/, (mono|stereo|(\d+) channels|(\d+)\.(\d+)(?:\(\w+\))?)\b/);
+    let channels = 0;
+    if (ch) channels = ch[1] === 'mono' ? 1 : ch[1] === 'stereo' ? 2 : ch[2] ? +ch[2] : +ch[3] + +ch[4];
+    return { type: m[1].toLowerCase(), codec: m[2], channels, attachedPic: /attached pic/.test(rest) };
+  });
+  return { duration: d ? hms(d[1], d[2], d[3]) : 0, streams: list };
+}
+
 async function grabFrame(file, atSeconds, outFile, width = 480) {
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   const { code } = await run([
@@ -54,36 +69,33 @@ async function grabFrame(file, atSeconds, outFile, width = 480) {
   return code === 0 && fs.existsSync(outFile);
 }
 
-// Converts a file into a browser-friendly MP4 (H.264 + AAC). Copies streams when it can.
-function convert(file, outFile, info, onProgress) {
-  fs.mkdirSync(path.dirname(outFile), { recursive: true });
-  const tmp = outFile + '.part.mp4';
-  const args = ['-hide_banner', '-y', '-i', file, '-map', '0:v:0', '-map', '0:a:0?', '-sn'];
-  if (info.videoCodec === 'h264') args.push('-c:v', 'copy');
-  else args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p');
-  if (info.audioCodec === 'aac') args.push('-c:a', 'copy');
-  else args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
-  args.push('-movflags', '+faststart', tmp);
-
+// Runs one FFmpeg conversion (args from converter.js) at below-normal priority, so playback
+// stays smooth. onProgress gets 0..1 from FFmpeg's "time=" lines.
+function convertRun(args, duration, onProgress) {
   let proc;
+  let killed = false;
   const promise = new Promise((resolve) => {
     proc = spawn(ffmpegPath, args, { windowsHide: true });
+    try {
+      require('os').setPriority(proc.pid, require('os').constants.priority.PRIORITY_BELOW_NORMAL);
+    } catch (_) {}
+    let tail = '';
     proc.stderr.on('data', (d) => {
-      const m = d.toString().match(/time=(\d+):(\d+):([\d.]+)/);
-      if (m && info.duration) onProgress(Math.min(0.999, hms(m[1], m[2], m[3]) / info.duration));
+      const s = d.toString();
+      tail = (tail + s).slice(-4000);
+      const m = s.match(/time=(\d+):(\d+):([\d.]+)/);
+      if (m && duration) onProgress(Math.min(0.999, hms(m[1], m[2], m[3]) / duration));
     });
-    proc.on('error', () => resolve(false));
-    proc.on('close', (code) => {
-      if (code === 0 && fs.existsSync(tmp)) {
-        fs.renameSync(tmp, outFile);
-        resolve(true);
-      } else {
-        try { fs.unlinkSync(tmp); } catch (_) {}
-        resolve(false);
-      }
-    });
+    proc.on('error', (e) => resolve({ ok: false, error: e.message }));
+    proc.on('close', (code) => resolve({ ok: code === 0 && !killed, killed, error: code === 0 ? '' : tail.trim().split('\n').slice(-2).join(' ') }));
   });
-  return { promise, cancel: () => proc && proc.kill() };
+  return { promise, cancel: () => { killed = true; if (proc) proc.kill(); } };
+}
+
+// Decodes a few seconds from `at` (video and audio) and reports whether it went cleanly.
+async function decodeCheck(file, at) {
+  const { code } = await run(['-hide_banner', '-v', 'error', '-xerror', '-ss', String(Math.max(0, at)), '-i', file, '-t', '4', '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-']);
+  return code === 0;
 }
 
 function readText(file) {
@@ -103,4 +115,4 @@ function subtitleToVtt(file) {
   return 'WEBVTT\n\n' + body;
 }
 
-module.exports = { probe, grabFrame, convert, subtitleToVtt, ffmpegPath };
+module.exports = { probe, streams, grabFrame, convertRun, decodeCheck, subtitleToVtt, ffmpegPath, PLAY_CONTAINERS, PLAY_VIDEO, PLAY_AUDIO };

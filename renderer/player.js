@@ -94,14 +94,6 @@ const Player = (() => {
       isFull = on;
       q('[data-p="full"]').innerHTML = on ? ICON.unfull : ICON.full;
     });
-    cb.onConvertProgress(({ fileId, p }) => {
-      if (st && st.file.id === fileId) {
-        const bar = q('.p-overlay .bar i');
-        const pct = q('.p-overlay .pct');
-        if (bar) bar.style.width = Math.round(p * 100) + '%';
-        if (pct) pct.textContent = Math.round(p * 100) + '%';
-      }
-    });
     document.addEventListener('keydown', onKey, true);
   }
 
@@ -112,7 +104,7 @@ const Player = (() => {
   function open({ file, series, startAt, onClose }) {
     if (!root) build();
     root.hidden = false;
-    st = { file, series, onClose, dismissedNext: false, triedConvert: false };
+    st = { file, series, onClose, dismissedNext: false, convScreen: false };
     load(file, startAt);
     // Pressing Play with Couchbox maximised plays fullscreen. Next episodes don't re-check:
     // they keep whatever the player is in.
@@ -149,10 +141,13 @@ const Player = (() => {
     q('[data-p="subs-menu"]').parentElement.hidden = !file.subs.length;
     video.volume = S.settings.volume == null ? 1 : S.settings.volume;
     loadSubtitles(file);
-    if (!file.playable && !file.converted) {
+    // The converter waits for the player to let go of a file before swapping it.
+    cb.playing(file.id);
+    st.convScreen = false;
+    if (!file.playable) {
       video.removeAttribute('src');
       video.load();
-      showConvertPrompt(false);
+      showConvScreen();
     } else setSource(file.video, st.startAt);
     clearInterval(saveTimer);
     saveTimer = setInterval(() => !video.paused && save(), 5000);
@@ -227,7 +222,7 @@ const Player = (() => {
     video.load();
     scrub.removeAttribute('src');
     scrub.load();
-    if (st.converting) cb.cancelConvert(st.file.id);
+    cb.playing(null);
     st = null;
     root.hidden = true;
     // Fullscreen stays on after the video: leave it with Esc, F11 or the top-bar button.
@@ -408,36 +403,56 @@ const Player = (() => {
   function onError() {
     if (!st || !video.getAttribute('src')) return;
     q('.p-spin').hidden = true;
-    if (st.file.converted || st.triedConvert) {
-      showOverlay(`<h2>This video won't play</h2><p>The file might be damaged or incomplete. Try playing it in another player to check.</p><div class="btns"><button class="btn btn-light btn-sm" data-p="back">Back</button></div>`);
-    } else showConvertPrompt(true);
+    // In the queue already (or it failed / was skipped): say where it's at.
+    if (Conv.of(st.file.id)) return showConvScreen();
+    // The scan thought it would play, but it doesn't here: offer a full conversion.
+    showOverlay(`<h2>This video won't play here</h2><p>Couchbox can convert it to a format that plays. The original goes to the bin until the new copy has been watched.</p>
+      <div class="btns"><button class="btn btn-accent btn-sm" data-p="conv-force">Convert it</button><button class="btn btn-grey btn-sm" data-p="back">Back</button></div>`);
   }
 
-  function showConvertPrompt(failed) {
-    showOverlay(`<h2>${failed ? "This video can't play as it is" : 'This video needs a quick conversion'}</h2>
-      <p>Its format isn't one Couchbox can play directly. Couchbox can make a playable copy once, and your original file stays untouched. This can take a few minutes for a full-length video.</p>
-      <div class="btns"><button class="btn btn-accent btn-sm" data-p="convert">Convert now</button>${failed ? '' : '<button class="btn btn-grey btn-sm" data-p="try-anyway">Try anyway</button>'}<button class="btn btn-grey btn-sm" data-p="back">Back</button></div>`);
-  }
-
-  async function convert() {
-    st.converting = true;
-    st.triedConvert = true;
+  // A video that isn't ready: where it is in the conversion queue, kept up to date.
+  function showConvScreen() {
     const file = st.file;
-    showOverlay(`<h2>Converting…</h2><p>Making a playable copy of "${esc(file.title)}". You can leave this open or go back. The conversion stops if you go back.</p>
-      <div class="bar"><i></i></div><div class="pct" style="color:#aaa;font-size:14px">0%</div>
-      <div class="btns" style="margin-top:18px"><button class="btn btn-grey btn-sm" data-p="back">Cancel</button></div>`);
-    const url = await cb.convert(file.id);
-    if (!st || st.file !== file) return;
-    st.converting = false;
-    if (!url) {
-      showOverlay(`<h2>Conversion didn't work</h2><p>FFmpeg couldn't read this file. It may be damaged.</p><div class="btns"><button class="btn btn-light btn-sm" data-p="back">Back</button></div>`);
-      return;
+    st.convScreen = true;
+    const fresh = readyVersion(file);
+    if (fresh) {
+      return showOverlay(`<h2>Ready to play</h2><p>"${esc(file.title)}" has been converted.</p>
+        <div class="btns"><button class="btn btn-accent btn-sm" data-p="conv-play">${ICON.play}Play</button><button class="btn btn-grey btn-sm" data-p="back">Back</button></div>`);
     }
-    file.converted = true;
-    file.playable = true;
-    file.video = url;
-    hideOverlay();
-    setSource(url, st.startAt);
+    const c = Conv.of(file.id);
+    const anyway = '<button class="btn btn-grey btn-sm" data-p="try-anyway">Try anyway</button>';
+    const back = '<button class="btn btn-grey btn-sm" data-p="back">Back</button>';
+    const pct = c ? (c.s === 'finishing' ? 100 : Math.floor((c.p || 0) * 100)) : 0;
+    if (c && (c.s === 'converting' || c.s === 'finishing'))
+      return showOverlay(`<h2>Getting this ready to play</h2><p>Couchbox is converting "${esc(file.title)}" so it plays here. It carries on if you go back.</p>
+        <div class="bar"><i data-conv-bar="${esc(file.id)}" style="width:${pct}%"></i></div><div class="pct" data-conv-pct="${esc(file.id)}" style="color:#aaa;font-size:14px">${pct}%</div>
+        <div class="btns" style="margin-top:18px">${anyway}${back}</div>`);
+    if (c && c.s === 'waiting')
+      return showOverlay(`<h2>Waiting to convert</h2><p>"${esc(file.title)}" needs converting before it plays here. It's ${esc(Conv.place(file.id))}.${Conv.state().paused ? ' Conversions are paused in Settings, Playback.' : ''}</p>
+        <div class="btns"><button class="btn btn-accent btn-sm" data-p="conv-next">Queue next</button>${anyway}${back}</div>`);
+    if (c && c.s === 'failed') {
+      const f = Conv.state().failed.find((r) => r.id === file.id);
+      return showOverlay(`<h2>Couldn't convert this video</h2><p>${esc(f ? f.reason : 'The conversion didn\'t work.')}</p>
+        <div class="btns"><button class="btn btn-accent btn-sm" data-p="conv-retry">Try again</button>${anyway}${back}</div>`);
+    }
+    if (c && c.s === 'skipped')
+      return showOverlay(`<h2>Kept as original</h2><p>This file was left as it is, and it doesn't play here.</p>
+        <div class="btns"><button class="btn btn-accent btn-sm" data-p="conv-retry">Convert</button>${anyway}${back}</div>`);
+    showOverlay(`<h2>This video needs converting</h2><p>Its format doesn't play here. Turn on "Convert videos that won't play" in Settings, Playback, or try anyway.</p>
+      <div class="btns">${anyway}${back}</div>`);
+  }
+
+  // The converted version of a file, once it's in the library (it may have a new id).
+  function readyVersion(file) {
+    const id = (Conv.state().renamed || {})[file.id] || file.id;
+    const found = findEpisode(id);
+    const now = found ? found.ep : byId(id);
+    return now && now.playable && !Conv.of(id) && (id !== file.id || !file.playable) ? now : null;
+  }
+
+  // Called when the conversion queue changes.
+  function convChanged() {
+    if (st && st.convScreen) showConvScreen();
   }
 
   function showOverlay(html) {
@@ -542,10 +557,23 @@ const Player = (() => {
       case 'intro-start': return setIntro({ start: Math.floor(video.currentTime) });
       case 'intro-end': return setIntro({ end: Math.floor(video.currentTime) });
       case 'intro-clear': return setIntro(null);
-      case 'convert': return convert();
+      case 'conv-next':
+        return cb.convQueueNext(st.file.id);
+      case 'conv-retry':
+        return cb.convRetry(st.file.id);
+      case 'conv-force':
+        st.convScreen = true;
+        return cb.convForce(st.file.id);
+      case 'conv-play': {
+        const fresh = readyVersion(st.file);
+        const at = st.startAt;
+        close();
+        if (fresh) startPlayer(fresh, fresh.kind === 'episode' ? findEpisode(fresh.id).series : null, at);
+        return;
+      }
       case 'try-anyway':
         hideOverlay();
-        st.triedConvert = false;
+        st.convScreen = false;
         return setSource(st.file.video, st.startAt);
     }
   }
@@ -634,5 +662,5 @@ const Player = (() => {
     });
   }
 
-  return { open, close, isOpen };
+  return { open, close, isOpen, convChanged };
 })();

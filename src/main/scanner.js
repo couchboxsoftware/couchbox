@@ -76,7 +76,8 @@ function walk(dir, depth, out) {
       if (!SKIP_DIRS.test(e.name)) walk(full, depth + 1, out);
     } else if (e.isFile()) {
       const ext = path.extname(e.name).toLowerCase();
-      if (VIDEO_EXT.has(ext) && !/\bsample\b/i.test(e.name)) out.videos.push(full);
+      // "<name>.converting.<ext>" is a conversion in progress (see converter.js), not a video yet.
+      if (VIDEO_EXT.has(ext) && !/\bsample\b/i.test(e.name) && !/\.converting\.\w+$/i.test(e.name)) out.videos.push(full);
       else if (SUB_EXT.has(ext)) out.subs.push(full);
     }
   }

@@ -6,6 +6,7 @@ const { Library } = require('./src/main/library');
 const { Tmdb } = require('./src/main/tmdb');
 const updater = require('./src/main/updater');
 const { Finder } = require('./src/main/finder');
+const { Converter } = require('./src/main/converter');
 
 if (process.env.COUCHBOX_DATA_DIR) app.setPath('userData', process.env.COUCHBOX_DATA_DIR);
 
@@ -14,6 +15,7 @@ let store = null;
 let library = null;
 let updates = null;
 let finder = null;
+let converter = null;
 let avatarDir = null; // profile pictures: <data>\avatars\<profile>-<time>.jpg
 
 const send = (ch, payload) => {
@@ -69,6 +71,33 @@ function migrateShowIds(map) {
   if (!changed) return;
   store.save();
   send('prefs-changed', { intros: d.intros, kidsAllow: d.kidsAllow });
+}
+
+// A converted file got a new name (for example .avi -> .mp4), so its id changed: move every
+// profile's progress, My list entries and the kids setting to the new id.
+function migrateFileId(oldId, newId) {
+  const d = store.data;
+  for (const p of Object.values(d.progress)) {
+    if (p[oldId] && !p[newId]) p[newId] = p[oldId];
+    delete p[oldId];
+  }
+  for (const pid of Object.keys(d.lists || {})) d.lists[pid] = [...new Set(d.lists[pid].map((id) => (id === oldId ? newId : id)))];
+  if (oldId in d.kidsAllow) {
+    if (!(newId in d.kidsAllow)) d.kidsAllow[newId] = d.kidsAllow[oldId];
+    delete d.kidsAllow[oldId];
+  }
+  store.save();
+  send('prefs-changed', { intros: d.intros, kidsAllow: d.kidsAllow, progress: true });
+}
+
+/* ---------- warnings ---------- */
+// Anything that needs attention raises a warning against a Settings tab and section. The app
+// shows a yellow "!" on the menu button, on Settings in the menu, on the tab and on the section.
+const warnings = new Map();
+function setWarning(id, w) {
+  if (w) warnings.set(id, { id, ...w });
+  else if (!warnings.delete(id)) return;
+  send('warnings', [...warnings.values()]);
 }
 
 /* ---------- how the window opens ---------- */
@@ -270,6 +299,17 @@ app.whenReady().then(() => {
   });
   library.setTmdbKey(getKey());
   library.setRoot(store.data.settings.libraryPath);
+  converter = new Converter({
+    dataDir,
+    getLibrary: () => library,
+    getProgress: () => store.data.progress,
+    migrate: migrateFileId,
+    onWarning: setWarning,
+    send,
+    enabled: () => store.data.settings.autoConvert !== false,
+  });
+  converter.start();
+  library.afterRefresh = () => converter.pump();
   finder = new Finder({
     getLibrary: () => library,
     send,
@@ -286,7 +326,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  library && library.cancelAll();
+  converter && converter.stopAll(); // half-done conversions start again next time
   store && store.save(true);
   library && library.meta.save(true);
   app.quit();
@@ -298,6 +338,7 @@ const publicSettings = () => {
   return {
     libraryPath: s.libraryPath, hasTmdbKey: !!getKey(), volume: s.volume, autoplayNext: s.autoplayNext !== false, previews: s.previews !== false,
     openMode: openMode(), openingSounds: s.openingSounds !== false, soundVolume: soundVolume(),
+    autoConvert: s.autoConvert !== false,
   };
 };
 
@@ -309,6 +350,8 @@ ipcMain.handle('init', () => ({
   intros: store.data.intros,
   kidsAllow: store.data.kidsAllow,
   model: library.model(),
+  conversions: converter.view(),
+  warnings: [...warnings.values()],
 }));
 
 ipcMain.handle('kids:set', (_e, itemId, allow) => {
@@ -323,6 +366,7 @@ ipcMain.handle('choose-folder', async () => {
   if (r.canceled || !r.filePaths[0]) return null;
   store.data.settings.libraryPath = r.filePaths[0];
   store.save();
+  converter.cancelRunning(); // conversions in the old folder stop; the new folder gets its own queue
   library.setRoot(r.filePaths[0]);
   library.refresh();
   return publicSettings();
@@ -344,10 +388,14 @@ ipcMain.handle('set-tmdb-key', async (_e, key) => {
 });
 
 ipcMain.handle('settings:set', (_e, patch) => {
-  const allowed = ['volume', 'autoplayNext', 'previews', 'openingSounds', 'soundVolume', 'openMode'];
+  const allowed = ['volume', 'autoplayNext', 'previews', 'openingSounds', 'soundVolume', 'openMode', 'autoConvert'];
   for (const k of allowed) if (k in patch) store.data.settings[k] = patch[k];
   if ('openMode' in patch && !OPEN_MODES.includes(patch.openMode)) store.data.settings.openMode = 'fullscreen';
   store.save();
+  if ('autoConvert' in patch) {
+    if (!patch.autoConvert) converter.cancelRunning();
+    converter.pump();
+  }
   return publicSettings();
 });
 
@@ -411,6 +459,7 @@ ipcMain.handle('progress:set', (_e, pid, fileId, t, d) => {
   if (t == null) delete p[fileId];
   else p[fileId] = { t: Math.round(t), d: Math.round(d), u: Date.now() };
   store.save();
+  if (t != null && d > 0 && t / d >= 0.9) converter.checkBin(); // a binned original may be done with
 });
 ipcMain.handle('progress:bulk', (_e, pid, entries) => {
   const p = (store.data.progress[pid] = store.data.progress[pid] || {});
@@ -420,6 +469,7 @@ ipcMain.handle('progress:bulk', (_e, pid, entries) => {
     else p[fileId] = { t: Math.round(t), d: Math.round(d), u: now };
   }
   store.save();
+  converter.checkBin(); // "Mark as watched" counts as watched for the bin too
   return p;
 });
 
@@ -441,8 +491,20 @@ ipcMain.handle('intro:set', (_e, seriesId, range) => {
 });
 
 ipcMain.handle('subtitle', (_e, fileId, index) => library.subtitle(fileId, index));
-ipcMain.handle('convert', (_e, fileId) => library.convert(fileId, (p) => send('convert-progress', { fileId, p })));
-ipcMain.handle('convert:cancel', (_e, fileId) => library.cancelConvert(fileId));
+/* ---------- conversions ---------- */
+ipcMain.handle('conv:state', () => converter.view());
+ipcMain.handle('conv:queue-next', (_e, key) => converter.queueNext(key));
+ipcMain.handle('conv:retry', (_e, fileId) => converter.retry(fileId));
+ipcMain.handle('conv:force', (_e, fileId) => converter.force(fileId));
+ipcMain.handle('conv:pause', (_e, paused) => converter.setPaused(paused));
+ipcMain.handle('conv:restore', (_e, key, mode) => converter.restore(key, mode === 'skip' ? 'skip' : 'retry'));
+ipcMain.handle('conv:empty-bin', () => converter.emptyBin());
+ipcMain.handle('conv:open-bin', async () => {
+  const dir = converter.binDir();
+  if (!dir || !fs.existsSync(dir)) return 'The bin is empty.';
+  return (await shell.openPath(dir)) ? "Windows couldn't open the folder." : '';
+});
+ipcMain.handle('playing', (_e, fileId) => converter.setPlaying(fileId));
 ipcMain.handle('match:search', (_e, itemId, q) => library.searchMatches(itemId, q));
 ipcMain.handle('match:fix', (_e, itemId, tmdbId) => library.fixMatch(itemId, tmdbId));
 ipcMain.handle('library:refresh', () => library.refresh());

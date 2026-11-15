@@ -21,7 +21,7 @@ fs.mkdirSync(out, { recursive: true });
 process.env.COUCHBOX_DATA_DIR = dataDir;
 const file = path.join(dataDir, 'couchbox-data.json');
 const data = process.env.SW_FRESH === '1' || !fs.existsSync(file) ? {
-  settings: { libraryPath: process.env.COUCHBOX_LIBRARY, previews: false },
+  settings: { libraryPath: process.env.COUCHBOX_LIBRARY, previews: false, autoConvert: false }, // never rewrite the sample videos
   profiles: [{ id: 'p1', name: 'Sam', color: '#2E9E6B', kids: false }, { id: 'p2', name: 'Alex', color: '#3B82C4', kids: false, clicks: false }],
 } : JSON.parse(fs.readFileSync(file, 'utf8'));
 if (step === 'sounds-on') Object.assign(data.settings, { openingSounds: true, soundVolume: 0.5, openMode: 'window' });

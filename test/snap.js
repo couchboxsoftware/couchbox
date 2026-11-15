@@ -117,16 +117,10 @@ app.on('browser-window-created', (_e, win) => {
       await snap('09-details-film');
       await js(`closeModal(); play(S.model.films.find(f=>f.title==='Paper Moons'))`);
       await wait(1000);
-      await snap('10-convert-prompt');
-      await js(`document.querySelector('[data-p="convert"]').click()`);
-      for (let i = 0; i < 60; i++) {
-        await wait(500);
-        if (await js(`document.querySelector('.p-overlay').hidden`)) break;
-      }
-      await wait(2000);
-      await js(`document.getElementById('player').dispatchEvent(new MouseEvent('mousemove', {bubbles:true}))`);
-      await snap('11-converted-playing');
-      console.log('converted audio playing:', await js(`(() => { const v = document.querySelector('#player video.main'); return JSON.stringify({ t: v.currentTime, paused: v.paused, src: v.currentSrc.slice(-20), err: v.error && v.error.code }); })()`));
+      // Automatic conversion is off in tests (it would rewrite the sample files), so the player
+      // says this one needs converting. test/conversion-check.js covers the conversions.
+      await snap('10-needs-converting');
+      console.log('needs-converting screen:', await js(`document.querySelector('.p-overlay').innerText.split('\\n')[0]`));
       await js(`Player.close()`);
       await wait(500);
       await js(`openSettings()`);

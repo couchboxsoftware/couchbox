@@ -14,6 +14,8 @@ const S = {
   details: null, // { id, season }
   settingsTab: null, // the Settings tab used last, until Couchbox closes
   pendingRender: false,
+  conv: null, // the conversion queue (see conv-ui.js and src/main/converter.js)
+  warnings: [], // things that need attention: a yellow "!" on the menu, Settings, the tab and section
 };
 
 /* ================= derived data ================= */
@@ -108,8 +110,14 @@ async function boot() {
   S.kidsAllow = init.kidsAllow || {};
   S.model = init.model;
   S.lastProfile = init.lastProfile;
+  S.conv = init.conversions;
+  S.warnings = init.warnings || [];
+  cb.onConversions(Conv.onState);
+  cb.onConvProgress(Conv.onProgress);
+  cb.onWarnings(Conv.onWarnings);
   cb.onLibrary((m) => {
     S.model = m;
+    if (Player.isOpen()) Player.convChanged(); // a converted file may be ready now
     scheduleRender();
   });
   cb.onStatus(showStatus);
@@ -118,6 +126,8 @@ async function boot() {
     S.intros = p.intros;
     S.kidsAllow = p.kidsAllow || {};
     if (S.profile) S.list = await cb.getList(S.profile.id);
+    // A converted file got a new name: its progress moved to the new id.
+    if (S.profile && p.progress) S.progress = await cb.getProgress(S.profile.id);
     scheduleRender();
   });
   showStatus(S.model.status || { phase: 'idle' });
@@ -374,7 +384,7 @@ function renderBrowse(app) {
       <label class="searchbox ${S.query ? 'open' : ''}" id="searchbox">${ICON.search}<input id="search" placeholder="Titles, episodes, genres" value="${esc(S.query)}" spellcheck="false" /></label>
       <button class="exit-full" data-act="exit-full" aria-label="Exit full screen" title="Exit full screen (Esc)">${ICON.unfull}</button>
       ${S.profile.kids ? '<span class="badge" style="border-color:var(--accent);color:var(--accent)">KIDS</span>' : ''}
-      <button class="profile-menu-btn" data-act="profile-menu" aria-label="Profile menu">${avatarHTML(S.profile)}${ICON.down}</button>
+      <button class="profile-menu-btn" data-act="profile-menu" aria-label="Profile menu">${avatarHTML(S.profile)}${ICON.down}${S.warnings.length ? Conv.dot() : ''}</button>
     </div>
   </header>
   <main id="content"></main>`;
@@ -425,7 +435,10 @@ function cardHTML(item, extra = {}) {
   const tag = extra.pct == null && isNew(item) ? '<span class="newtag">NEW</span>' : '';
   const label = extra.label ? `<span class="eplabel">${esc(extra.label)}</span>` : '';
   const bar = extra.pct > 0 ? `<div class="pbar"><i style="width:${Math.round(extra.pct * 100)}%"></i></div>` : '';
-  return `<div class="card" data-act="open" data-id="${esc(item.id)}" tabindex="0" aria-label="${esc(item.title)}">${inner}${tag}${label}${bar}</div>`;
+  // A film being converted (or waiting) is grey, with an orange line rising as it goes. Series
+  // cards stay as they are; their episodes show it inside.
+  const conv = item.kind === 'film' ? Conv.overlay(item.id) : '';
+  return `<div class="card" data-act="open" data-id="${esc(item.id)}" tabindex="0" aria-label="${esc(item.title)}">${inner}${conv}${conv ? '' : tag}${label}${bar}</div>`;
 }
 
 function genreRows(list, prefix) {
@@ -692,14 +705,14 @@ function openDetails(id, season) {
   renderDetails();
 }
 
-function episodeRowHTML(e, label) {
+function episodeRowHTML(e, label, series) {
   const p = S.progress[e.id];
   const watched = isWatched(p);
   const pct = p ? Math.min(1, p.t / p.d) : 0;
   return `<div class="ep" data-act="play-file" data-file="${esc(e.id)}">
     <div class="ep-num">${e.episode}</div>
-    <div class="ep-thumb">${e.still ? `<img src="${e.still}" loading="lazy" alt="" />` : ''}<div class="playov"><span>${ICON.play}</span></div>${pct > 0 ? `<div class="pbar"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}</div>
-    <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}</span><small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
+    <div class="ep-thumb">${e.still ? `<img src="${e.still}" loading="lazy" alt="" />` : ''}${Conv.overlay(e.id)}<div class="playov"><span>${ICON.play}</span></div>${pct > 0 ? `<div class="pbar"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}</div>
+    <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}</span>${series ? Conv.episodeTag(e, series) : ''}<small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
     <p class="ep-ov">${esc(e.overview || (watched ? 'Watched' : p && p.t > 10 ? fmtDuration(p.d - p.t) + ' left' : ''))}</p></div>
     <button class="ep-mark ${watched ? 'on' : ''}" data-act="mark" data-file="${esc(e.id)}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${ICON.check}</button>
   </div>`;
@@ -723,7 +736,7 @@ function renderDetails() {
           ? `<select class="select" id="season-select">${item.seasons.map((s) => `<option value="${s.number}" ${s.number === season.number ? 'selected' : ''}>${esc(s.name)} (${s.episodes.length})</option>`).join('')}</select>`
           : `<span style="color:#aaa">${esc(season.name)}</span>`
       }</div></div>
-      <div>${season.episodes.map((e) => episodeRowHTML(e)).join('')}</div>`;
+      <div>${season.episodes.map((e) => episodeRowHTML(e, '', item)).join('')}</div>`;
   }
   const progressBar =
     info && info.pct > 0 && info.p
@@ -747,6 +760,7 @@ function renderDetails() {
         <div>
           <div class="d-meta">${metaBits(item)}${isNew(item) ? '<span class="badge" style="border-color:var(--accent);color:var(--accent)">NEW</span>' : ''}</div>
           ${progressBar}
+          ${Conv.detailsHTML(item)}
           ${item.tagline ? `<div class="d-tagline">${esc(item.tagline)}</div>` : ''}
           <p class="d-overview">${esc(item.overview || (S.model.tmdb ? 'No description found. If this is the wrong title, use "Fix match" below.' : 'Add a TMDB key in Settings to get descriptions and posters.'))}</p>
         </div>
@@ -754,7 +768,6 @@ function renderDetails() {
           ${item.genres.length ? `<div><span>Genres: </span>${item.genres.map(esc).join(', ')}</div>` : ''}
           ${item.kind === 'series' ? `<div><span>In your library: </span>${item.episodeCount} episode${item.episodeCount === 1 ? '' : 's'}</div>` : ''}
           ${fileItem && fileItem.subs.length ? `<div><span>Subtitles: </span>${fileItem.subs.map((s) => esc(s.label)).join(', ')}</div>` : ''}
-          ${fileItem && !fileItem.playable ? `<div><span>Format: </span>needs a one-time conversion to play</div>` : ''}
         </div>
       </div>
       ${body}
@@ -841,7 +854,7 @@ function openSettings(err, tab) {
   if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
   S.settingsTab = tab;
   const bar = `<div class="stabs" role="tablist">${tabs
-    .map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" class="${k === tab ? 'on' : ''}" data-act="settings-tab" data-tab="${k}">${l}</button>`)
+    .map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" class="${k === tab ? 'on' : ''}" data-act="settings-tab" data-tab="${k}">${l}${Conv.tabHasWarning(k) ? Conv.dot() : ''}</button>`)
     .join('')}</div>`;
   const head = `<h2 style="margin-bottom:14px">Settings</h2>${bar}`;
   const ov = `<div class="overlay${$('#modal-root .settings-dlg') ? ' no-anim' : ''}" data-close="1">`;
@@ -869,7 +882,8 @@ function openSettings(err, tab) {
     <div class="settings-section">
       <label class="toggle"><span class="t-text"><b>Autoplay next episode</b><small>Starts the next episode after a short countdown.</small></span><span class="switch"><input type="checkbox" data-setting="autoplayNext" ${st.autoplayNext ? 'checked' : ''} /><span></span></span></label>
       <label class="toggle"><span class="t-text"><b>Previews</b><small>Plays muted clips when you hover over a title or wait on the banner.</small></span><span class="switch"><input type="checkbox" data-setting="previews" ${st.previews ? 'checked' : ''} /><span></span></span></label>
-    </div>`,
+    </div>
+    ${Conv.sectionHTML() || '<div id="conv-section"></div>'}`,
     app: `
     <div class="settings-section"><h3>Sounds</h3>
       <label class="toggle"><span class="t-text"><b>Opening sounds</b><small>An organ while Couchbox starts and a warm chord when it opens.</small></span><span class="switch"><input type="checkbox" data-setting="openingSounds" ${st.openingSounds ? 'checked' : ''} /><span></span></span></label>
@@ -891,6 +905,7 @@ function openSettings(err, tab) {
     <div class="row-btns"><button class="btn btn-sm btn-accent" data-act="close-modal">Done</button></div>
   </div></div>`;
   Updates.renderSettings();
+  Conv.bindSection();
   $$('[data-setting]').forEach((c) =>
     c.addEventListener('change', async () => {
       S.settings = await cb.setSettings({ [c.dataset.setting]: c.checked });
@@ -954,7 +969,7 @@ function toggleProfileMenu() {
   m.id = 'pmenu';
   m.innerHTML = `${others.map((p) => `<button data-act="pick-profile" data-pid="${p.id}">${avatarHTML(p)}${esc(p.name)}</button>`).join('')}
     <button data-act="manage-profiles">${ICON.pencil}Manage profiles</button>
-    <hr /><button data-act="settings">${ICON.gear}Settings</button><button data-act="switch-profile">${ICON.back}Switch profile</button>`;
+    <hr /><button data-act="settings">${ICON.gear}Settings${S.warnings.length ? Conv.dot() : ''}</button><button data-act="switch-profile">${ICON.back}Switch profile</button>`;
   $('#app').appendChild(m);
 }
 
@@ -1023,6 +1038,10 @@ document.addEventListener('click', async (e) => {
   if (!el) return;
   const act = el.dataset.act;
   const id = el.dataset.id;
+  if (act.startsWith('conv-')) {
+    e.stopPropagation();
+    return Conv.act(act, el);
+  }
   switch (act) {
     case 'choose-folder': {
       const st = await cb.chooseFolder();
