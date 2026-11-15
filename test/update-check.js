@@ -18,8 +18,22 @@ fs.mkdirSync(out, { recursive: true });
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-upd-'));
 process.env.COUCHBOX_DATA_DIR = dataDir;
+// COUCHBOX_UPDATE_WAIT=1: a conversion is running when the update finishes downloading, so it
+// must wait ("Will update when conversions finish") and install once the conversion is done.
+const WAIT = !!process.env.COUCHBOX_UPDATE_WAIT;
+let library = process.env.COUCHBOX_LIBRARY;
+if (WAIT) {
+  library = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-upd-lib-'));
+  fs.mkdirSync(path.join(library, 'Films'));
+  const f = path.join(library, 'Films', 'Long Haul (2001).mkv');
+  require('child_process').spawnSync(require('ffmpeg-static'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=25:duration=20', '-f', 'lavfi', '-i', 'sine=duration=20',
+    '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'eac3', f]);
+  const t = new Date(Date.now() - 3600e3);
+  fs.utimesSync(f, t, t);
+  process.env.COUCHBOX_CONV_RATE = '0.4'; // about 50 seconds
+}
 fs.writeFileSync(path.join(dataDir, 'couchbox-data.json'), JSON.stringify({
-  settings: { libraryPath: process.env.COUCHBOX_LIBRARY, ...require('./quiet').TEST_SETTINGS },
+  settings: { libraryPath: library, ...require('./quiet').TEST_SETTINGS, ...(WAIT ? { autoConvert: true } : {}) },
   profiles: [{ id: 'p1', name: 'Sam', color: '#2E9E6B', kids: false }],
 }));
 
@@ -104,6 +118,15 @@ server.listen(0, '127.0.0.1', () => {
         console.log('banner says:', await js(`document.getElementById('update-banner').innerText.replace(/\\s+/g,' ')`));
         await snap('21-update-downloading');
 
+        if (WAIT) {
+          await until('waiting for conversions', `/Will update when conversions finish/.test(document.getElementById('update-banner').innerText)`, 120000);
+          await snap('24-update-waiting');
+          console.log('waiting banner shown; conversions running:', global.__couchbox.converter.running.size, '; install so far:', installCalls);
+          await wait(3000);
+          console.log('still waiting after 3 s:', installCalls === 0 ? 'yes' : 'NO');
+          await until('conversion done', `!document.querySelector('#update-banner') || /Restarting/.test(document.getElementById('update-banner').innerText)`, 180000);
+          console.log('conversions running when it installed:', global.__couchbox.converter.running.size);
+        }
         await until('download finished', `/Restarting/.test(document.getElementById('update-banner').innerText)`, 120000);
         await snap('22-update-ready');
         await wait(1800);

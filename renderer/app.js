@@ -6,7 +6,7 @@ const S = {
   model: { films: [], series: [], status: { phase: 'idle' } },
   progress: {},
   list: [],
-  intros: {},
+  introData: { episodes: {} }, // intros found automatically, per episode (src/main/intros.js)
   tab: 'home',
   query: '',
   managing: false,
@@ -17,6 +17,7 @@ const S = {
   conv: null, // the conversion queue (see conv-ui.js and src/main/converter.js)
   warnings: [], // things that need attention: a yellow "!" on the menu, Settings, the tab and section
   dl: { files: {} }, // files still downloading or unfinished (see dl-ui.js and src/main/downloads.js)
+  copies: null, // spare copies and different versions (see copies-ui.js and src/main/copies.js)
 };
 
 /* ================= derived data ================= */
@@ -107,7 +108,12 @@ async function boot() {
   S.settings = init.settings;
   S.avatarBase = init.avatarBase;
   S.profiles = init.profiles;
-  S.intros = init.intros;
+  S.introData = init.introData || { episodes: {} };
+  S.introAskMs = init.introAskMs;
+  cb.onIntros((d) => {
+    S.introData = d;
+    if (Player.isOpen()) Player.introsChanged();
+  });
   S.kidsAllow = init.kidsAllow || {};
   S.model = init.model;
   S.lastProfile = init.lastProfile;
@@ -118,6 +124,12 @@ async function boot() {
   cb.onWarnings(Conv.onWarnings);
   S.dl = init.downloads || { files: {} };
   cb.onDownloads(DL.onState);
+  S.copies = init.copies;
+  cb.onCopies(Copies.onState);
+  // Hidden to the tray: a playing video pauses.
+  cb.onWindowHidden(() => Player.isOpen() && Player.pause());
+  // A notification asked for a Settings tab (e.g. "Choose a Couchbox folder first").
+  cb.onOpenSettings((tab) => S.profile && openSettings(null, tab));
   cb.onLibrary((m) => {
     S.model = m;
     if (Player.isOpen()) Player.convChanged(); // a converted file may be ready now
@@ -126,7 +138,6 @@ async function boot() {
   cb.onStatus(showStatus);
   // Shows merged from season folders: settings moved to the combined show (see main.js).
   cb.onPrefsChanged(async (p) => {
-    S.intros = p.intros;
     S.kidsAllow = p.kidsAllow || {};
     if (S.profile) S.list = await cb.getList(S.profile.id);
     // A converted file got a new name: its progress moved to the new id.
@@ -382,7 +393,7 @@ function renderBrowse(app) {
   app.innerHTML = `
   <header class="nav" id="nav">
     <div class="brand" data-act="tab" data-tab="home">${brandHTML()}</div>
-    <nav class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.tab === k && !S.query ? 'active' : ''}" data-act="tab" data-tab="${k}">${l}</button>`).join('')}</nav>
+    <nav class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.tab === k && !S.query ? 'active' : ''}" data-act="tab" data-tab="${k}">${l}</button>`).join('')}<button class="tab ${S.tab === 'unmatched' && !S.query ? 'active' : ''}" data-act="tab" data-tab="unmatched" hidden>Unmatched <span class="tab-count"></span></button></nav>
     <div class="nav-right">
       <label class="searchbox ${S.query ? 'open' : ''}" id="searchbox">${ICON.search}<input id="search" placeholder="Titles, episodes, genres" value="${esc(S.query)}" spellcheck="false" /></label>
       <button class="exit-full" data-act="exit-full" aria-label="Exit full screen" title="Exit full screen (Esc)">${ICON.unfull}</button>
@@ -416,6 +427,7 @@ function renderBrowse(app) {
     }
   });
   renderContent();
+  WhatsNew.maybeShowCard(); // once, after an update
 }
 
 function rowHTML(key, title, entries) {
@@ -442,7 +454,9 @@ function cardHTML(item, extra = {}) {
   // cards stay as they are; their episodes show it inside.
   // A film still downloading: the same look in purple ("Downloading 38%"), or an Incomplete tag.
   const conv = item.kind === 'film' ? DL.overlay(item.id) || Conv.overlay(item.id) : '';
-  return `<div class="card" data-act="open" data-id="${esc(item.id)}" tabindex="0" aria-label="${esc(item.title)}">${inner}${conv}${conv ? '' : tag}${label}${bar}</div>`;
+  // A new version gets a yellow "!" (compare); versions kept side by side show their length.
+  const ver = item.kind === 'film' ? Copies.cardBits(item.id) : '';
+  return `<div class="card" data-act="open" data-id="${esc(item.id)}" tabindex="0" aria-label="${esc(item.title)}">${inner}${conv}${conv ? '' : tag}${label}${bar}${ver}</div>`;
 }
 
 function genreRows(list, prefix) {
@@ -467,8 +481,12 @@ function renderContent(keepScroll = false) {
   const saved = keepScroll ? { top: app.scrollTop, rows: Object.fromEntries($$('.row').map((r) => [r.dataset.row, $('.track', r).scrollLeft])) } : null;
 
   const vis = visible();
+  Unmatched.updateTab();
   if (S.query) {
     content.innerHTML = searchHTML(vis);
+  } else if (S.tab === 'unmatched') {
+    stopHeroVideo();
+    content.innerHTML = Unmatched.pageHTML();
   } else if (!allItems().length) {
     stopHeroVideo();
     const scanning = S.model.status && S.model.status.phase !== 'idle';
@@ -716,7 +734,7 @@ function episodeRowHTML(e, label, series) {
   return `<div class="ep" data-act="play-file" data-file="${esc(e.id)}">
     <div class="ep-num">${e.episode}</div>
     <div class="ep-thumb">${e.still ? `<img src="${e.still}" loading="lazy" alt="" />` : ''}${DL.overlay(e.id) || Conv.overlay(e.id)}<div class="playov"><span>${ICON.play}</span></div>${pct > 0 ? `<div class="pbar"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}</div>
-    <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}</span>${DL.episodeTag(e) || (series ? Conv.episodeTag(e, series) : '')}<small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
+    <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}${Copies.lengthSuffix(e.id)}</span>${(S.copies && S.copies.versionOf[e.id]) ? Copies.cardBits(e.id) : ''}${DL.episodeTag(e) || (series ? Conv.episodeTag(e, series) : '')}<small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
     <p class="ep-ov">${esc(e.overview || (watched ? 'Watched' : p && p.t > 10 ? fmtDuration(p.d - p.t) + ' left' : ''))}</p></div>
     <button class="ep-mark ${watched ? 'on' : ''}" data-act="mark" data-file="${esc(e.id)}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${ICON.check}</button>
   </div>`;
@@ -761,7 +779,7 @@ function renderDetails() {
   box.innerHTML = `
     <button class="d-close" data-act="close-modal" aria-label="Close">${ICON.x}</button>
     <div class="d-hero">${item.backdrop ? `<img src="${item.backdrop}" alt="" />` : `<div style="position:absolute;inset:0;background:linear-gradient(120deg,hsl(${hashHue(item.title)} 40% 24%),#181818)"></div>`}
-      <div class="d-hero-info"><h2 class="d-title">${esc(item.title)}</h2>
+      <div class="d-hero-info"><h2 class="d-title">${esc(item.title)}${Copies.lengthSuffix(item.id)}</h2>
         <div class="d-actions">
           ${pieShown ? DL.pie(dlFile) : `<button class="btn btn-light" data-act="play" data-id="${esc(item.id)}">${ICON.play}${esc(info ? info.label : 'Play')}</button>`}
           ${info && info.pct > 0 ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="restart" data-id="${esc(item.id)}">Start over</button>` : ''}
@@ -775,6 +793,7 @@ function renderDetails() {
         <div>
           <div class="d-meta">${metaBits(item)}${isNew(item) ? '<span class="badge" style="border-color:var(--accent);color:var(--accent)">NEW</span>' : ''}</div>
           ${progressBar}
+          ${Copies.detailsHTML(item)}
           ${dlLine || (fileItem && DL.of(item.id) ? '' : Conv.detailsHTML(item))}
           ${item.tagline ? `<div class="d-tagline">${esc(item.tagline)}</div>` : ''}
           <p class="d-overview">${esc(item.overview || (S.model.tmdb ? 'No description found. If this is the wrong title, use "Fix match" below.' : 'Add a TMDB key in Settings to get descriptions and posters.'))}</p>
@@ -808,41 +827,9 @@ function closeModal() {
 }
 
 /* ---------- fix match ---------- */
+// The Fix match window lives in unmatched-ui.js (shared with the Unmatched tab).
 function openFixMatch(id) {
-  const item = byId(id);
-  S.details = null;
-  const root = $('#modal-root');
-  root.innerHTML = `<div class="overlay" data-close="1"><div class="dialog">
-    <h2>Fix match</h2><p>Search TMDB for the right ${item.kind === 'film' ? 'film' : 'series'}, then pick it.</p>
-    <div class="inline"><input class="input" id="fm-q" value="${esc(item.title)}" /><button class="btn btn-sm btn-accent" id="fm-go">${ICON.search}Search</button></div>
-    <div class="match-list" id="fm-results"></div>
-    <div class="row-btns"><button class="btn btn-sm btn-ghost" data-act="close-modal">Cancel</button></div></div></div>`;
-  const go = async () => {
-    const out = $('#fm-results');
-    out.innerHTML = '<div class="spinner" style="margin:20px auto"></div>';
-    try {
-      const results = await cb.searchMatches(id, $('#fm-q').value.trim());
-      out.innerHTML = results.length
-        ? results
-            .map((r) => `<button class="match" data-tmdb="${r.id}">${r.poster ? `<img src="${r.poster}" alt="" />` : '<div class="noimg"></div>'}<div><b>${esc(r.title)} ${r.year ? `(${esc(r.year)})` : ''}</b><small>${esc(r.overview)}</small></div></button>`)
-            .join('')
-        : '<p style="margin:12px 0 0">No results. Try a shorter title.</p>';
-      $$('.match', out).forEach((b) =>
-        b.addEventListener('click', async () => {
-          out.innerHTML = '<div class="spinner" style="margin:20px auto"></div>';
-          await cb.fixMatch(id, Number(b.dataset.tmdb));
-          closeModal();
-          toast('Match updated');
-          setTimeout(() => openDetails(id), 300);
-        })
-      );
-    } catch (e) {
-      out.innerHTML = `<div class="err">${esc(e.message)}</div>`;
-    }
-  };
-  $('#fm-go').onclick = go;
-  $('#fm-q').addEventListener('keydown', (e) => e.key === 'Enter' && go());
-  go();
+  Unmatched.openFix(id);
 }
 
 /* ---------- settings ---------- */
@@ -892,7 +879,8 @@ function openSettings(err, tab) {
       <div class="inline"><input class="input" id="set-key" placeholder="${st.hasTmdbKey ? 'Paste a new key to replace it' : 'Paste your TMDB key'}" spellcheck="false" /><button class="btn btn-sm btn-ghost" data-act="settings-save-key">Save</button></div>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
       <div class="inline" style="margin-top:10px">${st.hasTmdbKey ? '<button class="btn btn-sm btn-ghost" data-act="remove-key">Remove key</button><button class="btn btn-sm btn-ghost" data-act="refetch">Fetch all info again</button>' : ''}</div>
-    </div>`,
+    </div>
+    ${Copies.sectionHTML()}`,
     playback: `
     <div class="settings-section">
       <label class="toggle"><span class="t-text"><b>Autoplay next episode</b><small>Starts the next episode after a short countdown.</small></span><span class="switch"><input type="checkbox" data-setting="autoplayNext" ${st.autoplayNext ? 'checked' : ''} /><span></span></span></label>
@@ -912,20 +900,34 @@ function openSettings(err, tab) {
         ['fullscreen', 'Full screen', 'No title bar or taskbar. Esc or F11 leaves it.'],
         ['remember', 'Remember last', 'Opens exactly as you left it.'],
       ].map(([v, l, d]) => `<label class="open-mode"><input type="radio" name="open-mode" value="${v}" ${st.openMode === v ? 'checked' : ''} /><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
+      <label class="toggle" style="margin-top:12px"><span class="t-text"><b>Start with Windows</b><small>Couchbox starts hidden by the clock, ready to convert new videos. Closing the window always keeps it running there.</small></span><span class="switch"><input type="checkbox" data-setting="startWithWindows" ${st.startWithWindows ? 'checked' : ''} /><span></span></span></label>
+      ${st.shellMenuAvailable ? `<label class="toggle"><span class="t-text"><b>Show Couchbox in the right-click menu</b><small>Right-click videos or folders in File Explorer and choose Couchbox, then Copy or Move to Couchbox. On Windows 11 it's under Show more options.</small></span><span class="switch"><input type="checkbox" id="set-shellmenu" ${st.shellMenu ? 'checked' : ''} /><span></span></span></label><div class="err" id="shellmenu-err" hidden></div>` : ''}
     </div>
-    <div class="settings-section"><h3>Updates</h3><div id="settings-updates"></div></div>`,
+    <div class="settings-section"><h3>Updates</h3><div id="settings-updates"></div></div>
+    <div class="settings-section"><h3>What's new</h3><div id="settings-whatsnew"></div></div>`,
   }[tab];
   $('#modal-root').innerHTML = `${ov}<div class="dialog settings-dlg" style="width:min(640px,92vw)">
     ${head}${body}
     <div class="row-btns"><button class="btn btn-sm btn-accent" data-act="close-modal">Done</button></div>
   </div></div>`;
   Updates.renderSettings();
+  WhatsNew.renderSettings();
   Conv.bindSection();
   $$('[data-setting]').forEach((c) =>
     c.addEventListener('change', async () => {
       S.settings = await cb.setSettings({ [c.dataset.setting]: c.checked });
     })
   );
+  const menuSw = $('#set-shellmenu');
+  if (menuSw)
+    menuSw.addEventListener('change', async () => {
+      const err = await cb.setShellMenu(menuSw.checked);
+      const box = $('#shellmenu-err');
+      box.hidden = !err;
+      box.textContent = err || '';
+      if (err) menuSw.checked = !menuSw.checked;
+      else S.settings.shellMenu = menuSw.checked;
+    });
   const clicks = $('#set-clicks');
   if (clicks)
     clicks.addEventListener('change', async () => {
@@ -984,7 +986,8 @@ function toggleProfileMenu() {
   m.id = 'pmenu';
   m.innerHTML = `${others.map((p) => `<button data-act="pick-profile" data-pid="${p.id}">${avatarHTML(p)}${esc(p.name)}</button>`).join('')}
     <button data-act="manage-profiles">${ICON.pencil}Manage profiles</button>
-    <hr /><button data-act="settings">${ICON.gear}Settings${S.warnings.length ? Conv.dot() : ''}</button><button data-act="switch-profile">${ICON.back}Switch profile</button>`;
+    <hr /><button data-act="settings">${ICON.gear}Settings${S.warnings.length ? Conv.dot() : ''}</button><button data-act="switch-profile">${ICON.back}Switch profile</button>
+    <hr /><button data-act="quit-app">${ICON.x}Quit Couchbox</button>`;
   $('#app').appendChild(m);
 }
 
@@ -1067,6 +1070,11 @@ document.addEventListener('click', async (e) => {
   if (act.startsWith('conv-')) {
     e.stopPropagation();
     return Conv.act(act, el);
+  }
+  if (act.startsWith('wn-')) return WhatsNew.act(act);
+  if (act.startsWith('copy-') || act.startsWith('version-')) {
+    e.stopPropagation();
+    return Copies.act(act, el);
   }
   switch (act) {
     case 'choose-folder': {
@@ -1172,6 +1180,10 @@ document.addEventListener('click', async (e) => {
       if (e.target.closest('[data-act="mark"]')) break;
       playFile(el.dataset.file);
       break;
+    case 'quit-app':
+      $('#pmenu')?.remove();
+      cb.quit(); // asks first if conversions are running
+      break;
     case 'play-partial': {
       // The pie: play what's downloaded so far.
       const found = findEpisode(el.dataset.file);
@@ -1205,7 +1217,7 @@ document.addEventListener('click', async (e) => {
       cb.fullscreen(false);
       break;
     case 'fix-match':
-      openFixMatch(id);
+      Unmatched.openFix(id, el.dataset.from === 'tab');
       break;
     case 'reveal':
       cb.reveal(el.dataset.file);

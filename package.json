@@ -1,7 +1,7 @@
 {
   "name": "couchbox",
   "productName": "Couchbox",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Your home video library, streaming-style.",
   "main": "main.js",
   "author": "Couchbox Software",
@@ -30,11 +30,14 @@
       "src/**/*",
       "renderer/**/*",
       "build/icon.png",
+      "build/tray/*.png",
+      "CHANGELOG.md",
       "node_modules/**/*",
       "!test/**/*"
     ],
     "asarUnpack": [
-      "node_modules/ffmpeg-static/**/*"
+      "node_modules/ffmpeg-static/**/*",
+      "src/main/intro-worker.js"
     ],
     "win": {
       "target": [
@@ -47,6 +50,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
+      "include": "build/installer.nsh",
       "shortcutName": "Couchbox",
       "artifactName": "Couchbox-Setup-${version}.exe"
     },

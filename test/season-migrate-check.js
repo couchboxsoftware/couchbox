@@ -25,7 +25,8 @@ fs.writeFileSync(path.join(dataDir, 'couchbox-data.json'), JSON.stringify({
   settings: { libraryPath: lib, previews: false, ...TEST_SETTINGS },
   profiles: [{ id: 'p1', name: 'Sam', color: '#2E9E6B', kids: false }, { id: 'p2', name: 'Alex', color: '#3B82C4', kids: false }],
   lists: { p1: [OLD2, 'film:night.train.2019.mkv', OLD1], p2: [OLD1] },
-  intros: { [OLD2]: { start: 12, end: 48 } },
+  intros: { [OLD2]: { start: 12, end: 48 } }, // old series-wide marks: no longer used, removed
+  introSeasons: { [OLD2 + '|2']: { status: 'confirmed', ref: { episodeId: 'x', start: 12, end: 48 } } },
   kidsAllow: { [OLD1]: true },
   progress: { p1: { [epId]: { t: 600, d: 2500, u: Date.now() } } },
   lastProfile: 'p1',
@@ -54,16 +55,16 @@ app.on('browser-window-created', (_e, win) => {
       const d = data();
       check('My list: old entries replaced by the combined show, once, in place', JSON.stringify(d.lists.p1) === JSON.stringify([NEW, 'film:night.train.2019.mkv']), JSON.stringify(d.lists.p1));
       check('My list for another profile carried over too', JSON.stringify(d.lists.p2) === JSON.stringify([NEW]), JSON.stringify(d.lists.p2));
-      check('intro skip carried over', d.intros[NEW] && d.intros[NEW].start === 12 && !d.intros[OLD2], JSON.stringify(d.intros));
+      check('a season\'s intro (found automatically) carried over', d.introSeasons[NEW + '|2'] && d.introSeasons[NEW + '|2'].status === 'confirmed' && !d.introSeasons[OLD2 + '|2'], JSON.stringify(d.introSeasons));
+      check('old series-wide intro marks are removed', !('intros' in d));
       check('kids setting carried over', d.kidsAllow[NEW] === true && !(OLD1 in d.kidsAllow), JSON.stringify(d.kidsAllow));
       check('episode progress untouched', d.progress.p1[epId] && d.progress.p1[epId].t === 600);
       check('the app shows the carried-over My list straight away', await js(`S.list.includes(${JSON.stringify(NEW)}) && !S.list.includes(${JSON.stringify(OLD1)})`));
-      check('the app has the carried-over intro skip', await js(`!!S.intros[${JSON.stringify(NEW)}]`));
       // A second scan changes nothing more.
       const before = fs.readFileSync(path.join(dataDir, 'couchbox-data.json'), 'utf8');
       await js(`cb.refresh()`);
       await wait(2500);
-      check('a second scan leaves the settings as they are', JSON.stringify(JSON.parse(before).lists) === JSON.stringify(data().lists) && JSON.stringify(JSON.parse(before).intros) === JSON.stringify(data().intros));
+      check('a second scan leaves the settings as they are', JSON.stringify(JSON.parse(before).lists) === JSON.stringify(data().lists) && JSON.stringify(JSON.parse(before).introSeasons) === JSON.stringify(data().introSeasons));
     } catch (e) {
       failed++;
       console.log('FAIL  ' + e.message);

@@ -177,7 +177,9 @@ const Conv = (() => {
     const bin = st.bin.length
       ? `<h4>Bin</h4><p class="conv-note">${plural(st.bin.length, 'original', 'originals')}, ${fmtSize(st.binSize)}. Each is deleted once its new copy has been watched, or after 7 days.</p>
          <div class="inline"><button class="btn btn-sm btn-ghost" data-act="conv-open-bin">Open bin</button><button class="btn btn-sm btn-ghost" data-act="conv-empty-bin">Empty now</button></div>
-         ${st.bin.map((b) => `<div class="conv-row"><span class="cr-name">${esc(b.label)}<small>Deleted ${esc(fmtDay(b.deleteAt))}</small></span><button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="retry">Restore and retry</button><button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="skip">Restore and skip</button></div>`).join('')}`
+         ${st.bin.map((b) => `<div class="conv-row"><span class="cr-name">${esc(b.label)}<small>Deleted ${esc(fmtDay(b.deleteAt))}</small></span>${b.kind === 'copy'
+           ? `<button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="copy">Restore</button>`
+           : `<button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="retry">Restore and retry</button><button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="skip">Restore and skip</button>`}</div>`).join('')}`
       : '';
     return `<h3>Conversions${warn ? ' ' + dot() : ''}</h3>
       ${warnBox('conversions', false)}
@@ -244,6 +246,7 @@ const Conv = (() => {
     S.warnings = list;
     updateDots();
     renderSection();
+    if (typeof Copies !== 'undefined') Copies.renderSection();
   }
 
   /* ---------- buttons ---------- */
@@ -279,12 +282,12 @@ const Conv = (() => {
         return true;
       case 'conv-restore': {
         const err = await cb.convRestore(el.dataset.key, el.dataset.mode);
-        toast(err || (el.dataset.mode === 'skip' ? 'Original put back. It will be left as it is.' : 'Original put back. It will be converted again.'), err ? 5000 : 3000);
+        toast(err || (el.dataset.mode === 'copy' ? 'Put back where it was.' : el.dataset.mode === 'skip' ? 'Original put back. It will be left as it is.' : 'Original put back. It will be converted again.'), err ? 5000 : 3000);
         return true;
       }
     }
     return false;
   }
 
-  return { of, text, place, overlay, detailsHTML, episodeTag, sectionHTML, bindSection, renderSection, onState, onProgress, onWarnings, updateDots, act, dot, tabHasWarning, state };
+  return { of, text, place, overlay, detailsHTML, episodeTag, sectionHTML, bindSection, renderSection, onState, onProgress, onWarnings, updateDots, act, dot, tabHasWarning, state, warnBox };
 })();

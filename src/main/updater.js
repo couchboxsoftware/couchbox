@@ -16,7 +16,9 @@ const { app, shell } = require('electron');
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 const FIRST_CHECK_DELAY_MS = 8000;
 
-function create({ send }) {
+// canInstall(): false while conversions are running; the downloaded update then waits for them
+// ("Will update when conversions finish"), and onWaiting() stops new ones starting meanwhile.
+function create({ send, canInstall = () => true, onWaiting = () => {} }) {
   const portable = !!process.env.PORTABLE_EXECUTABLE_DIR;
   const testUrl = (process.env.COUCHBOX_UPDATE_URL || '').trim();
   const useTestUrl = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(testUrl);
@@ -53,9 +55,19 @@ function create({ send }) {
     );
     autoUpdater.on('download-progress', (p) => emit({ status: 'downloading', percent: Math.round(p.percent || 0) }));
     autoUpdater.on('update-downloaded', (info) => {
-      emit({ status: 'ready', version: info.version, percent: 100 });
-      // The user already chose "Update now", so restart straight into the new version.
-      setTimeout(() => autoUpdater.quitAndInstall(true, true), 1200);
+      state.version = info.version;
+      // The user already chose "Update now", so restart into the new version: straight away, or
+      // once the conversions that are running have finished.
+      if (canInstall()) return installNow();
+      emit({ status: 'waiting', percent: 100 });
+      onWaiting();
+      const t = setInterval(() => {
+        if (state.status !== 'waiting') return clearInterval(t);
+        if (canInstall()) {
+          clearInterval(t);
+          installNow();
+        }
+      }, 2000);
     });
     autoUpdater.on('error', (err) => {
       // A failed background check (offline, GitHub down) isn't worth bothering anyone about.
@@ -66,7 +78,7 @@ function create({ send }) {
 
   async function check(manual = false) {
     if (!autoUpdater) return { ...state };
-    if (['checking', 'downloading', 'ready'].includes(state.status)) return { ...state };
+    if (['checking', 'downloading', 'waiting', 'ready'].includes(state.status)) return { ...state };
     try {
       await autoUpdater.checkForUpdates();
     } catch (err) {
@@ -83,6 +95,14 @@ function create({ send }) {
     }
     emit({ status: 'downloading', percent: 0, error: null });
     autoUpdater.downloadUpdate().catch((err) => emit({ status: 'error', error: short(err) }));
+    return { ...state };
+  }
+
+  // Restart into the downloaded update now ("Update now anyway" stops conversions first).
+  function installNow() {
+    if (!autoUpdater || !['waiting', 'downloading'].includes(state.status)) return { ...state };
+    emit({ status: 'ready', percent: 100 });
+    setTimeout(() => autoUpdater.quitAndInstall(true, true), 1200);
     return { ...state };
   }
 
@@ -103,7 +123,7 @@ function create({ send }) {
     return useTestUrl ? testUrl : 'https://github.com';
   }
 
-  return { start, check, download, getState: () => ({ ...state }) };
+  return { start, check, download, installNow, getState: () => ({ ...state }) };
 }
 
 function plainNotes(notes) {

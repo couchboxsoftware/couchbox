@@ -263,4 +263,10 @@ function scanLibrary(root) {
   return { films, series };
 }
 
-module.exports = { scanLibrary, parseTitleYear, episodeInfo, stripSeason, seasonOfFolder, finalName, VIDEO_EXT };
+// The id the scanner gives a show whose folder is called `folderName` (as in Series\<name>\…).
+function showIdOf(folderName) {
+  const t = parseTitleYear(stripSeason(folderName)).title;
+  return 'series:' + (t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unsorted');
+}
+
+module.exports = { scanLibrary, parseTitleYear, episodeInfo, stripSeason, seasonOfFolder, finalName, showIdOf, VIDEO_EXT };

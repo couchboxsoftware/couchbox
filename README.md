@@ -63,12 +63,18 @@ Videos\
 
 Open Settings from the profile menu. It has four tabs along the top and reopens on the last one you used (until Couchbox closes):
 
-- **Library**: your video folder (Change folder, Rescan now, Open folder) and your TMDB key.
+- **Library**: your video folder (Change folder, Rescan now, Open folder), your TMDB key, and copies and versions (see below).
 - **Find videos**: see below.
 - **Playback**: autoplay next episode, previews, and conversions (see below).
-- **App**: sounds, what happens when Couchbox opens, and updates (with the version number).
+- **App**: sounds, what happens when Couchbox opens, Start with Windows, the right-click menu, updates (with the version number) and What's new.
 
-Kids profiles see only Playback and App. Settings for one title (kids, Fix match, skip intro) stay on that title's page.
+Kids profiles see only Playback and App. Settings for one title (kids, Fix match) stay on that title's page.
+
+## What's new
+
+**Settings → App → What's new** lists every version, newest first, with what it added, improved and fixed. After an update, a card shows the new version's notes once.
+
+Every version's notes are written once, in `CHANGELOG.md`, using the template at the top of that file (a headline, then New, Improved and Fixed). The app reads them from there, the Update available banner shows the headline, and `tools\release.ps1` uses the entry for the GitHub release notes. It won't publish a version that has no entry.
 
 ## Conversions
 
@@ -81,6 +87,17 @@ Videos the built-in player can't play are converted in the background, in your v
 - Each conversion needs the file's size plus a third free on the drive. If the next one doesn't fit, nothing new starts (running ones finish) and a yellow **!** shows on the menu button, Settings, the Playback tab and the Conversions section. It all starts again by itself once there's room.
 - While a film converts, its card is grey with an orange line rising from the bottom; waiting ones are grey with "Waiting". Episodes show the same in the episode list. Kids profiles see the warnings but not the queue or the bin.
 
+## Running in the background
+
+Closing the window hides Couchbox by the clock (the system tray) instead of quitting, so conversions, download checks and folder watching carry on. A playing video pauses when it hides.
+
+- **Tray icon:** the sofa. Grey when idle (light on a dark taskbar, dark on a light one), orange while converting, yellow when something needs attention (such as not enough space). Hover for the status; click or double-click to open Couchbox; right-click for the status, **Open Couchbox**, **Pause conversions** / **Resume conversions** and **Quit**.
+- **Quit** is in the tray menu and in the profile menu. If conversions are running it asks first; quitting stops them and deletes their half-made files (originals are never touched), and they start again next time. Windows shutting down never waits for this.
+- Only one Couchbox runs at a time: opening it again shows the one already running.
+- **Settings → App → Start with Windows** (off by default) starts Couchbox hidden in the tray when you sign in: no window, splash or sounds until you open it.
+- While anything is converting, Windows isn't allowed to sleep (the screen can still turn off).
+- **Updates:** if conversions are running when an update has downloaded, the banner says "Will update when conversions finish" and no new ones start; it installs as soon as they're done, or straight away with **Update now anyway** (the conversions then start again after the update).
+
 ## Downloads
 
 Videos that are still downloading show as **Downloading** instead of ready, and are never converted until they're finished. Couchbox watches new and changed files until they settle:
@@ -91,6 +108,22 @@ Videos that are still downloading show as **Downloading** instead of ready, and 
 - Pressing Play on a downloading title opens its page, where the Play button is a purple pie that fills as the file arrives (a turning arc when there's no percentage). Clicking the pie plays what's there so far.
 - A file that stops changing but fails the checks (a cancelled download, say) gets a grey **Incomplete** tag. It can still be played as far as it goes, isn't converted, and clears by itself if the download resumes and finishes.
 - If a file starts changing while it's being converted, the conversion stops and nothing is replaced.
+
+## Copies and versions
+
+- **Spare copies:** two or more files of the same film or episode, the same length, show as one card. It plays the best copy (highest resolution, then the largest file, then one not named "copy"). **Settings → Library → Copies and versions** lists the spares, with **Move to bin** (into `.couchbox-bin`, restorable for 7 days) or **Keep both**.
+- **Versions:** a second file of the same title with a clearly different length (an extended cut, say) gets a yellow **!** and a side-by-side comparison: **Replace the one I have** (the old one goes to the bin; the new one plays from the beginning, and the watched tick, My list and kids settings stay), **Keep the one I have** (the new one goes to the bin), or **Keep both** (both show, labelled by length). A new version that needs converting is converted straight away.
+
+## Right-click menu
+
+Right-click videos or folders in File Explorer and choose **Couchbox → Copy to Couchbox** or **Move to Couchbox** (on Windows 11, under **Show more options**). Folders are searched inside; everything you picked is added, whatever its length, and sorted like Find videos does it. A notification says how many were added, already there or couldn't be added. It works with Couchbox closed (it starts hidden). Turn it off in **Settings → App**; uninstalling removes it.
+
+## Skip intro
+
+Couchbox finds series intros by itself, in the background once nothing is converting: each episode's first 10 minutes of sound is compared with the episodes either side of it in the same season, and a shared stretch of at least 10 seconds is the intro. Short shared clips at the very start (studio logos), a season with one episode, anything after 10 minutes and films are left out. Each episode is checked once, and again only if its file changes.
+
+- **Skip** shows in the player during the intro. Until a season is confirmed it carries a **Guessed** tag.
+- After you skip in a guessed season, a small box asks **Was that the intro?** for a few seconds while the video keeps playing (kids profiles are never asked). **Yes** confirms the season: every episode is checked against that intro, and a shortened one skips just its part. **No** pauses and asks whether Skip appeared too soon or too late and skipped too far or not far enough, then goes back to where you pressed Skip and searches that episode again in that direction.
 
 ## Find videos
 
@@ -113,7 +146,9 @@ Where added videos go: recognised films to `Films\Title (Year)`, episodes to `Se
 2. Go to Settings, then API, and request an API key (choose "Developer", personal use).
 3. Paste the **API Key** or the **API Read Access Token** into Couchbox (on first launch or in **Settings → Library**).
 
-If a title gets the wrong poster, open it and click **Fix match**.
+If a title gets the wrong poster, open it and click **Fix match**. It shows the file name, folder and a short preview, and searches by year and by films, series or both. Once matched, the file is tidied into `Films\` or `Series\` (unless it's playing or converting, in which case that waits).
+
+Titles TMDB couldn't recognise are listed on an **Unmatched** tab (with a count; it's hidden when there are none), each with **Fix match**.
 
 ## Features
 
@@ -123,7 +158,6 @@ If a title gets the wrong poster, open it and click **Fix match**.
 - Series pages with a season picker, episode list, progress, and watched ticks.
 - Player with resume, scrub thumbnails, subtitles, speed, skip intro and the next-episode countdown.
 - Kids profiles show titles TMDB rates U or PG (or TV-Y, TV-G and similar). From a grown-up profile, open any title to show or hide it for kids.
-- Skip intro: in the player, click the gear and mark where the intro starts and ends. It then applies to every episode of that series.
 - Files the built-in player can't handle (AVI, WMV, AC3 or DTS audio, and so on) are converted automatically (see Conversions).
 
 - If the Couchbox window is maximised when you press Play, the video plays full screen. Full screen stays on when you leave the video; leave it with Esc (when nothing else is open), F11 or the button next to search.
@@ -132,7 +166,7 @@ If a title gets the wrong poster, open it and click **Fix match**.
 - Sounds: a theatre organ plays on the splash and a warm chord when the window opens; buttons, tabs, cards, profiles, My list and Settings toggles give a quiet tap (never during a video). In **Settings → App**, under Sounds: opening sounds on or off (whole app), click sounds on or off (each profile has its own), and one volume slider. The sounds are generated by `renderer/sounds.js`; there are no audio files.
 - **Settings → App**, under When Couchbox opens: Window (1400 × 860), Maximised, Full screen (the default) or Remember last (size, position, maximised or full screen, as you left it).
 
-Keyboard in the player: Space play/pause, Left/Right skip 10s, Up/Down volume, F full screen, M mute, N next episode, S skip intro, Esc back. F11 switches full screen anywhere.
+Keyboard in the player: Space play/pause, Left/Right skip 10s, Up/Down volume, F full screen, M mute, N next episode, S or Enter skip intro (while Skip shows), Esc back. F11 switches full screen anywhere.
 
 ## Where data is kept
 
@@ -156,8 +190,8 @@ powershell -File tools\release.ps1 -NoPublish   # build the .exe files into dist
 
 `npm run dist` also builds, but fails with "could not open file" errors when the project folder's path is long; `tools\release.ps1` avoids that by building from a short temporary folder.
 
-`test/snap.js` drives the real app against a folder of videos and saves screenshots. `node test/season-folders-check.js` checks season-pack folder names, and `test/season-migrate-check.js` checks settings carry over when split shows merge. `test/avatar-check.js` checks the picture cropper, saving, Cancel, Remove and clean-up. `test/sound-window-check.ps1` checks the sounds and every "When Couchbox opens" choice across several launches. `test/settings-tabs-check.js` checks each Settings tab holds the right settings, still saves them, reopens on the last tab, shows TMDB key problems on Library, and shows kids only Playback and App. `test/conversion-check.js` makes test videos with FFmpeg and checks automatic conversion end to end: the queue order, the 5 + 1 limit, Queue next, the safe swap, a broken file, the bin rules, Restore, Pause, the space warning and kids. `test/download-check.js` fakes downloads arriving (growing, temporarily named then renamed, torrent-style filled in out of order, cancelled half way, missing a middle, and changing during a conversion) and checks they show as Downloading or Incomplete, aren't converted early, and become normal once finished. All tests mute the app and turn automatic conversion off (`test/quiet.js`), so they never rewrite sample videos. `test/player-check.js` checks auto full screen, Esc/F11/the exit button and the next-episode timings. `test/finder-check.js` runs Find videos against a throwaway test folder (new films, copies, versions, files already in the library, a name clash, Copy, Move and Stop). `test/update-check.js` serves a built installer from a local stand-in release server and walks through the update banner, stopping just before it would install.
+`test/snap.js` drives the real app against a folder of videos and saves screenshots. `node test/season-folders-check.js` checks season-pack folder names, and `test/season-migrate-check.js` checks settings carry over when split shows merge. `test/avatar-check.js` checks the picture cropper, saving, Cancel, Remove and clean-up. `test/sound-window-check.ps1` checks the sounds and every "When Couchbox opens" choice across several launches. `test/settings-tabs-check.js` checks each Settings tab holds the right settings, still saves them, reopens on the last tab, shows TMDB key problems on Library, and shows kids only Playback and App. `test/conversion-check.js` makes test videos with FFmpeg and checks automatic conversion end to end: the queue order, the 5 + 1 limit, Queue next, the safe swap, a broken file, the bin rules, Restore, Pause, the space warning and kids. `test/background-check.js` checks the tray (colour, status, menu, Pause/Resume), hiding on close while conversions carry on, a file added while hidden, a second launch, Start with Windows (with a stand-in, so it never touches the registry), Quit while converting, and a hidden `--background` start. `test/update-check.js` with `COUCHBOX_UPDATE_WAIT=1` checks an update waits for a running conversion. `test/download-check.js` fakes downloads arriving (growing, temporarily named then renamed, torrent-style filled in out of order, cancelled half way, missing a middle, and changing during a conversion) and checks they show as Downloading or Incomplete, aren't converted early, and become normal once finished. `test/whatsnew-check.js` checks every CHANGELOG entry follows the template, the What's new list and the card after an update. `test/unmatched-check.js` checks the Unmatched tab and Fix match (preview, year and kind search, tidying into Films or Series, waiting while playing). `test/copies-check.js` checks spare copies, the best-copy pick, Move to bin, Keep both, and the three choices for a different version. `test/context-menu-check.js` checks the right-click menu (in a throwaway registry key, never the real one), Copy and Move, folders, already-there files and the notifications. `test/intro-detect-check.js` makes test seasons with a shared theme and checks intro detection (cold opens, logos, a theme broken in the middle, a shortened one, none, after 10 minutes, one-episode seasons, films, not checking twice) and the player's Skip, Guessed, the question, Yes and No. All tests mute the app and turn automatic conversion off (`test/quiet.js`), so they never rewrite sample videos. `test/player-check.js` checks auto full screen, Esc/F11/the exit button and the next-episode timings. `test/finder-check.js` runs Find videos against a throwaway test folder (new films, copies, versions, files already in the library, a name clash, Copy, Move and Stop). `test/update-check.js` serves a built installer from a local stand-in release server and walks through the update banner, stopping just before it would install.
 
-The logo (a line-drawn sofa), the app icon and the bold `couchbox` wordmark are defined in `renderer/brand.js`. After editing it, run `node_modules\electron\dist\electron.exe tools/render-icon.js` to regenerate `build/icon.png` and `build/icon-preview.png`.
+The logo (a line-drawn sofa), the app icon and the bold `couchbox` wordmark are defined in `renderer/brand.js`. After editing it, run `node_modules\electron\dist\electron.exe tools/render-icon.js` to regenerate `build/icon.png`, `build/icon-preview.png` and the tray icons in `build/tray/`.
 
 The splash screen is `renderer/splash.html`: a sofa-shaped, see-through window with an orange outline and slowly moving contour lines. To preview it without starting the app, run `node_modules\electron\dist\electron.exe tools/preview-splash.js` for stills, or `tools/record-splash.js` for a short clip. Both write to `build/`.

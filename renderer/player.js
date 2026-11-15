@@ -19,7 +19,8 @@ const Player = (() => {
       <div class="p-subs"></div>
       <div class="p-spin" hidden></div>
       <div class="p-top"><button class="pbtn" data-p="back" aria-label="Back" title="Back (Esc)">${ICON.back}</button><div class="p-name"></div></div>
-      <button class="skip-intro" hidden>Skip intro</button>
+      <button class="skip-intro" hidden>Skip<span class="guess-tag" hidden>Guessed</span></button>
+      <div class="intro-ask" hidden></div>
       <div class="next-card" hidden></div>
       <div class="p-bottom">
         <div class="timeline">
@@ -36,7 +37,6 @@ const Player = (() => {
           <button class="pbtn" data-p="next" aria-label="Next episode" title="Next episode (N)" hidden>${ICON.next}</button>
           <div style="position:relative"><button class="pbtn" data-p="subs-menu" aria-label="Subtitles" title="Subtitles">${ICON.subs}</button></div>
           <div style="position:relative"><button class="pbtn" data-p="speed-menu" aria-label="Playback speed" title="Speed">${ICON.speed}</button></div>
-          <div style="position:relative"><button class="pbtn" data-p="intro-menu" aria-label="Intro settings" title="Set the intro for this series" hidden>${ICON.gear}</button></div>
           <button class="pbtn" data-p="full" aria-label="Full screen" title="Full screen (F)">${ICON.full}</button>
         </div>
       </div>
@@ -137,7 +137,7 @@ const Player = (() => {
     q('[data-p="toggle"]').innerHTML = ICON.play;
     q('.p-subs').innerHTML = '';
     video.playbackRate = 1;
-    q('[data-p="intro-menu"]').hidden = !st.series;
+    hideAsk();
     q('[data-p="subs-menu"]').parentElement.hidden = !file.subs.length;
     video.volume = S.settings.volume == null ? 1 : S.settings.volume;
     loadSubtitles(file);
@@ -251,8 +251,12 @@ const Player = (() => {
     q('.tl-knob').style.left = pct + '%';
     q('.p-time').textContent = `${fmtTime(t)} / ${fmtTime(d)}`;
 
-    const intro = st.series && S.intros[st.series.id];
-    q('.skip-intro').hidden = !(intro && intro.end > intro.start && t >= intro.start && t < intro.end - 1);
+    // Skip shows only while this episode's intro is playing (found automatically: intros.js),
+    // with a "Guessed" tag until its season is confirmed.
+    const intro = introOf();
+    const skip = q('.skip-intro');
+    skip.hidden = !(intro && intro.end > intro.start && t >= intro.start && t < intro.end - 1);
+    if (!skip.hidden) skip.querySelector('.guess-tag').hidden = !intro.guessed;
 
     // Next episode: the card appears with 30 s left; with autoplay on, a 5 s countdown runs from
     // 20 s left and the next episode starts at 15 s left (the episode counts as watched).
@@ -295,9 +299,14 @@ const Player = (() => {
     q('.tl-buf').style.width = (end / d) * 100 + '%';
   }
 
+  // This episode's intro: { start, end, guessed, partial, season } or null.
+  function introOf() {
+    return (st && st.series && S.introData && S.introData.episodes[st.file.id]) || null;
+  }
+
   function drawIntro() {
     const el = q('.tl-intro');
-    const intro = st && st.series && S.intros[st.series.id];
+    const intro = introOf();
     const d = video.duration;
     if (!intro || !d || !(intro.end > intro.start)) return (el.hidden = true);
     el.hidden = false;
@@ -344,9 +353,71 @@ const Player = (() => {
     cb.fullscreen(!isFull);
   }
 
+  // Skip: jump to the end of the intro. In a season that's still guessed, grown-ups are asked
+  // whether that was right (the video keeps playing).
   function skipIntro() {
-    const intro = st.series && S.intros[st.series.id];
-    if (intro) video.currentTime = intro.end;
+    const intro = introOf();
+    if (!intro) return;
+    st.skippedFrom = video.currentTime;
+    st.skipped = { start: intro.start, end: intro.end };
+    video.currentTime = intro.end;
+    if (intro.guessed && !(S.profile && S.profile.kids)) showAsk();
+  }
+
+  /* ---------- "Was that the intro?" ---------- */
+  let askTimer = null;
+  function showAsk() {
+    const box = q('.intro-ask');
+    const ms = S.introAskMs || 15000;
+    box.innerHTML = `<p>Was that the intro, and did we skip it correctly?</p>
+      <div class="ia-btns"><button class="btn btn-sm btn-light" data-p="ia-yes" tabindex="-1">Yes</button><button class="btn btn-sm btn-grey" data-p="ia-no" tabindex="-1">No</button></div>
+      <div class="ia-bar"><i style="animation-duration:${ms}ms"></i></div>`;
+    box.hidden = false;
+    clearTimeout(askTimer);
+    askTimer = setTimeout(hideAsk, ms); // unanswered: asked again at the next Skip this season
+  }
+  function hideAsk() {
+    clearTimeout(askTimer);
+    const box = q('.intro-ask');
+    if (box) box.hidden = true;
+  }
+
+  async function answerYes() {
+    hideAsk();
+    await cb.introConfirm(st.file.id);
+    toast('Thanks. Skip is confirmed for this season.', 2500);
+  }
+
+  // No: pause, ask what was wrong, then go back to where Skip was pressed.
+  function answerNo() {
+    hideAsk();
+    video.pause();
+    const opt = (name, v, l) => `<label class="ia-opt"><input type="radio" name="${name}" value="${v}" /><span>${l}</span></label>`;
+    showOverlay(`<h2>What was wrong?</h2>
+      <div class="ia-q"><b>Did Skip appear…</b><div>${opt('ia-start', 'soon', 'Too soon')}${opt('ia-start', 'late', 'Too late')}${opt('ia-start', 'ok', 'At the right time')}</div></div>
+      <div class="ia-q"><b>Did it skip…</b><div>${opt('ia-end', 'far', 'Too far')}${opt('ia-end', 'short', 'Not far enough')}${opt('ia-end', 'ok', 'To the right point')}</div></div>
+      <div class="err" id="ia-err" hidden>Answer both questions first.</div>
+      <div class="btns"><button class="btn btn-accent btn-sm" data-p="ia-send">Send</button></div>`);
+  }
+
+  async function sendNo() {
+    const start = root.querySelector('input[name="ia-start"]:checked');
+    const end = root.querySelector('input[name="ia-end"]:checked');
+    if (!start || !end) return (q('#ia-err').hidden = false);
+    const file = st.file;
+    const old = st.skipped;
+    hideOverlay();
+    video.currentTime = st.skippedFrom || 0;
+    video.play().catch(() => {});
+    await cb.introReject(file.id, old, { start: start.value, end: end.value });
+    toast(start.value === 'ok' && end.value === 'ok' ? 'Thanks. Skip is confirmed for this season.' : "Thanks. Couchbox will look again for this episode's intro.", 3000);
+  }
+
+  // Intros were found or changed (a season confirmed, say): redraw.
+  function introsChanged() {
+    if (!st) return;
+    drawIntro();
+    onTime();
   }
 
   // markWatched: the episode was cut short by the early autoplay, so record it as finished.
@@ -492,27 +563,6 @@ const Player = (() => {
     pop(btn, `<h4>Speed</h4>${[0.5, 0.75, 1, 1.25, 1.5, 2].map((s) => `<button data-p="speed" data-speed="${s}"><span class="tick">${s === r ? ICON.check : ''}</span>${s === 1 ? 'Normal' : s + 'x'}</button>`).join('')}`);
   }
 
-  function introMenu(btn) {
-    const intro = S.intros[st.series.id];
-    const now = fmtTime(video.currentTime);
-    const desc = intro && intro.end > intro.start ? `${fmtTime(intro.start)} to ${fmtTime(intro.end)}` : intro && intro.start != null ? `starts ${fmtTime(intro.start)}, end not set` : 'not set';
-    pop(btn, `<h4>Intro for this series: ${desc}</h4>
-      <button data-p="intro-start"><span class="tick"></span>Intro starts here (${now})</button>
-      <button data-p="intro-end"><span class="tick"></span>Intro ends here (${now})</button>
-      ${intro ? '<button data-p="intro-clear"><span class="tick"></span>Clear intro</button>' : ''}
-      <div style="padding:6px 18px 4px;color:#888;font-size:12.5px;max-width:300px">Set it once and "Skip intro" shows on every episode of ${esc(st.series.title)}.</div>`);
-  }
-
-  async function setIntro(patch) {
-    const cur = S.intros[st.series.id] || {};
-    const next = patch === null ? null : { ...cur, ...patch };
-    S.intros = await cb.setIntro(st.series.id, next);
-    closePops();
-    drawIntro();
-    onTime();
-    if (next && next.end > next.start) toast('Intro saved for every episode');
-  }
-
   /* ---------- input ---------- */
   function onClick(e) {
     poke();
@@ -527,7 +577,7 @@ const Player = (() => {
       return;
     }
     const a = b.dataset.p;
-    if (!['subs-menu', 'speed-menu', 'intro-menu', 'sub', 'speed'].includes(a)) closePops();
+    if (!['subs-menu', 'speed-menu', 'sub', 'speed'].includes(a)) closePops();
     switch (a) {
       case 'back': return close();
       case 'toggle': return toggle();
@@ -546,7 +596,6 @@ const Player = (() => {
         return;
       case 'subs-menu': return subsMenu(b);
       case 'speed-menu': return speedMenu(b);
-      case 'intro-menu': return introMenu(b);
       case 'sub':
         applySubs(b.dataset.label);
         localStorage.setItem('cb.subs.' + S.profile.id, b.dataset.label);
@@ -554,9 +603,9 @@ const Player = (() => {
       case 'speed':
         video.playbackRate = Number(b.dataset.speed);
         return closePops();
-      case 'intro-start': return setIntro({ start: Math.floor(video.currentTime) });
-      case 'intro-end': return setIntro({ end: Math.floor(video.currentTime) });
-      case 'intro-clear': return setIntro(null);
+      case 'ia-yes': return answerYes();
+      case 'ia-no': return answerNo();
+      case 'ia-send': return sendNo();
       case 'conv-next':
         return cb.convQueueNext(st.file.id);
       case 'conv-retry':
@@ -602,7 +651,7 @@ const Player = (() => {
     else if (lower === 'm') { handled(); video.muted = !video.muted; }
     else if (lower === 'f') { handled(); toggleFull(); }
     else if (lower === 'n') { handled(); goNext(); }
-    else if (lower === 's' && !q('.skip-intro').hidden) { handled(); skipIntro(); }
+    else if ((lower === 's' || k === 'Enter') && !q('.skip-intro').hidden) { handled(); skipIntro(); } // Enter or S press Skip while it shows
     else if (k === 'Home') { handled(); video.currentTime = 0; }
   }
 
@@ -662,5 +711,13 @@ const Player = (() => {
     });
   }
 
-  return { open, close, isOpen, convChanged };
+  // Pauses without closing (the window was hidden to the tray).
+  function pause() {
+    if (st && !video.paused) {
+      video.pause();
+      save();
+    }
+  }
+
+  return { open, close, isOpen, convChanged, pause, introsChanged };
 })();

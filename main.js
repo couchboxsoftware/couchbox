@@ -8,8 +8,26 @@ const updater = require('./src/main/updater');
 const { Finder } = require('./src/main/finder');
 const { Converter } = require('./src/main/converter');
 const { Downloads } = require('./src/main/downloads');
+const background = require('./src/main/background');
+const { Tidy } = require('./src/main/tidy');
+const { Copies } = require('./src/main/copies');
+const shellMenu = require('./src/main/shell-menu');
+const { Intros } = require('./src/main/intros');
 
 if (process.env.COUCHBOX_DATA_DIR) app.setPath('userData', process.env.COUCHBOX_DATA_DIR);
+
+// One Couchbox at a time: opening it again (Start menu, desktop) shows the one already running,
+// even when it's hidden in the tray. (The lock is per data folder, so tests don't clash.)
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+  process.exit(0);
+}
+// Started hidden (by "Start with Windows", or by the right-click menu's Copy/Move to Couchbox):
+// no window, splash or sounds until it's opened.
+const FIRST_ADDS = shellMenu.parseAdds(process.argv);
+const BACKGROUND = process.argv.includes('--background') || FIRST_ADDS.length > 0;
+let bg = null;
+let addQueue = null;
 
 let win = null;
 let store = null;
@@ -18,6 +36,7 @@ let updates = null;
 let finder = null;
 let converter = null;
 let downloads = null;
+let intros = null;
 let avatarDir = null; // profile pictures: <data>\avatars\<profile>-<time>.jpg
 
 const send = (ch, payload) => {
@@ -61,7 +80,7 @@ function migrateShowIds(map) {
     d.lists[pid] = list.map((id) => map[id] || id).filter((id) => !seen.has(id) && seen.add(id));
     changed = true;
   }
-  for (const key of ['intros', 'kidsAllow']) {
+  for (const key of ['kidsAllow']) {
     const obj = d[key] || {};
     for (const [old, now] of Object.entries(map)) {
       if (!(old in obj)) continue;
@@ -70,9 +89,11 @@ function migrateShowIds(map) {
       changed = true;
     }
   }
+  // Each season's intro (found automatically) follows the show to its new id.
+  if (intros && intros.migrateShows(map)) changed = true;
   if (!changed) return;
   store.save();
-  send('prefs-changed', { intros: d.intros, kidsAllow: d.kidsAllow });
+  send('prefs-changed', { kidsAllow: d.kidsAllow });
 }
 
 // A converted file got a new name (for example .avi -> .mp4), so its id changed: move every
@@ -88,8 +109,9 @@ function migrateFileId(oldId, newId) {
     if (!(newId in d.kidsAllow)) d.kidsAllow[newId] = d.kidsAllow[oldId];
     delete d.kidsAllow[oldId];
   }
+  if (intros) intros.migrate(oldId, newId); // its intro too
   store.save();
-  send('prefs-changed', { intros: d.intros, kidsAllow: d.kidsAllow, progress: true });
+  send('prefs-changed', { kidsAllow: d.kidsAllow, progress: true });
 }
 
 /* ---------- warnings ---------- */
@@ -100,6 +122,7 @@ function setWarning(id, w) {
   if (w) warnings.set(id, { id, ...w });
   else if (!warnings.delete(id)) return;
   send('warnings', [...warnings.values()]);
+  if (bg) bg.setWarnings([...warnings.values()]); // the tray icon turns yellow
 }
 
 /* ---------- how the window opens ---------- */
@@ -177,7 +200,8 @@ function createWindow() {
   }
   // The main window stays hidden until the splash hands over (see showMainWindow).
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  win.on('close', saveWindowState);
+  bg.attach(win); // the close button hides to the tray; a real quit saves the window state too
+  win.on('close', () => bg.isQuitting() && saveWindowState());
   win.on('enter-full-screen', () => send('fullscreen', true));
   win.on('leave-full-screen', () => send('fullscreen', false));
   win.webContents.on('before-input-event', (e, input) => {
@@ -244,6 +268,11 @@ const splashStep = (text, status) => runSplash(`window.step && step(${JSON.strin
 function maybeFinishSplash() {
   if (boot.finished || !boot.rendererReady || !boot.scanned) return;
   boot.finished = true;
+  if (BACKGROUND) {
+    // Started hidden: stay in the tray until someone opens Couchbox.
+    updates.start();
+    return;
+  }
   splashStep('fluffing the cushions', 'ok');
   const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - (splashShownAt || Date.now())));
   setTimeout(() => {
@@ -266,7 +295,12 @@ ipcMain.on('app-ready', () => {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
-  updates = updater.create({ send });
+  updates = updater.create({
+    send,
+    // A downloaded update waits for running conversions to finish, and no new ones start meanwhile.
+    canInstall: () => !converter || converter.running.size === 0,
+    onWaiting: () => converter && converter.setHold(true),
+  });
   // Settings are read first: the splash needs to know whether to play its sound.
   const dataDir = app.getPath('userData');
   store = new JsonStore(path.join(dataDir, 'couchbox-data.json'), {
@@ -274,12 +308,29 @@ app.whenReady().then(() => {
     profiles: [],
     progress: {},
     lists: {},
-    intros: {},
     kidsAllow: {},
     lastProfile: null,
   });
   avatarDir = path.join(dataDir, 'avatars');
-  createSplash();
+  bg = background.create({
+    getWindow: () => win,
+    store,
+    getConverter: () => converter,
+    showWindow: showMainWindow,
+    saveWindowState,
+    send,
+    booting: () => !BACKGROUND && !boot.finished,
+  });
+  bg.startTray();
+  // Keep "Start with Windows" pointing at this copy of Couchbox (it may have moved or updated).
+  if (store.data.settings.startWithWindows) bg.setStartWithWindows(true);
+  // Opening Couchbox again shows this one; Explorer's Copy/Move to Couchbox hands its files over.
+  app.on('second-instance', (_e, argv) => {
+    const adds = shellMenu.parseAdds(argv || []);
+    if (adds.length && addQueue) addQueue.add(adds);
+    else bg.show();
+  });
+  if (!BACKGROUND) createSplash();
   // Safety net: never leave someone staring at the splash.
   setTimeout(() => {
     boot.rendererReady = boot.scanned = true;
@@ -318,11 +369,62 @@ app.whenReady().then(() => {
     getProgress: () => store.data.progress,
     migrate: migrateFileId,
     onWarning: setWarning,
-    send,
+    // The tray follows the queue too (its colour and status, and keeping the PC awake).
+    send: (ch, payload) => {
+      send(ch, payload);
+      if (ch === 'conversions') {
+        bg.conversions(payload);
+        // Nothing converting any more: intro detection can carry on.
+        if (!payload.converting && intros) intros.schedule();
+      }
+    },
     enabled: () => store.data.settings.autoConvert !== false,
   });
   converter.start();
-  library.afterRefresh = () => converter.pump();
+  // After Fix match, files are tidied into Films\ or Series\ (some wait for their conversion).
+  library.tidy = new Tidy({
+    getLibrary: () => library,
+    getConverter: () => converter,
+    migrateFile: migrateFileId,
+    migrateShow: migrateShowIds,
+    store,
+  });
+  // Spare copies and different versions put in the folder by hand.
+  library.copies = new Copies({
+    dataDir,
+    getLibrary: () => library,
+    binFile: (file, label) => converter.binCopy(file, label),
+    // "Replace the one I have": start from the beginning (a "watched" tick stays).
+    clearResume: (cardId) => {
+      for (const p of Object.values(store.data.progress)) {
+        const e = p[cardId];
+        if (e && !(e.d > 0 && e.t / e.d >= 0.95)) delete p[cardId];
+      }
+      store.save();
+      send('prefs-changed', { kidsAllow: store.data.kidsAllow, progress: true });
+    },
+    onWarning: setWarning,
+    send,
+  });
+  // Intros found automatically, one season at a time, once the conversion queue is empty.
+  intros = new Intros({ dataDir, getLibrary: () => library, getConverter: () => converter, store, send });
+  // The right-click menu: files handed over by Explorer are added like Find videos adds them.
+  addQueue = new shellMenu.AddQueue({
+    getLibrary: () => library,
+    notify: (n) => (global.__couchboxNotify || shellMenu.windowsNotify)(n),
+    showWindow: (tab) => {
+      bg.show();
+      if (tab) send('open-settings', tab);
+    },
+  });
+  addQueue.add(FIRST_ADDS);
+  // Keep the menu pointing at this Couchbox (installed copies; the switch is in Settings, App).
+  if (shellMenu.available() && store.data.settings.shellMenu !== false) shellMenu.register().then((err) => err && console.error('[menu]', err));
+  library.afterRefresh = () => {
+    converter.pump();
+    library.tidy.runPending().catch((e) => console.error('[tidy]', e));
+    intros.schedule();
+  };
   finder = new Finder({
     getLibrary: () => library,
     send,
@@ -337,6 +439,17 @@ app.whenReady().then(() => {
     setTimeout(() => library.refresh(), 30);
   });
 });
+
+// Quitting: stop conversions and delete their half-made files (originals are never touched).
+app.on('will-quit', () => {
+  if (!converter) return;
+  converter.stopAll();
+  converter.cleanTemps();
+  if (intros) intros.stop();
+});
+
+// For the test scripts (they run in this same process).
+global.__couchbox = { get intros() { return intros; }, get addQueue() { return addQueue; }, get bg() { return bg; }, get converter() { return converter; }, get library() { return library; }, get updates() { return updates; } };
 
 app.on('window-all-closed', () => {
   converter && converter.stopAll(); // half-done conversions start again next time
@@ -353,6 +466,9 @@ const publicSettings = () => {
     libraryPath: s.libraryPath, hasTmdbKey: !!getKey(), volume: s.volume, autoplayNext: s.autoplayNext !== false, previews: s.previews !== false,
     openMode: openMode(), openingSounds: s.openingSounds !== false, soundVolume: soundVolume(),
     autoConvert: s.autoConvert !== false,
+    startWithWindows: !!s.startWithWindows,
+    shellMenu: s.shellMenu !== false,
+    shellMenuAvailable: shellMenu.available(),
   };
 };
 
@@ -361,11 +477,13 @@ ipcMain.handle('init', () => ({
   avatarBase: require('url').pathToFileURL(avatarDir).href + '/',
   profiles: store.data.profiles,
   lastProfile: store.data.lastProfile,
-  intros: store.data.intros,
+  introData: intros.view(),
+  introAskMs: Number(process.env.COUCHBOX_INTRO_ASK_MS) || 15000, // how long "Was that the intro?" stays
   kidsAllow: store.data.kidsAllow,
   model: library.model(),
   conversions: converter.view(),
   downloads: downloads.view(),
+  copies: library.copies.view(),
   warnings: [...warnings.values()],
 }));
 
@@ -403,7 +521,8 @@ ipcMain.handle('set-tmdb-key', async (_e, key) => {
 });
 
 ipcMain.handle('settings:set', (_e, patch) => {
-  const allowed = ['volume', 'autoplayNext', 'previews', 'openingSounds', 'soundVolume', 'openMode', 'autoConvert'];
+  const allowed = ['volume', 'autoplayNext', 'previews', 'openingSounds', 'soundVolume', 'openMode', 'autoConvert', 'startWithWindows'];
+  if ('startWithWindows' in patch) bg.setStartWithWindows(!!patch.startWithWindows);
   for (const k of allowed) if (k in patch) store.data.settings[k] = patch[k];
   if ('openMode' in patch && !OPEN_MODES.includes(patch.openMode)) store.data.settings.openMode = 'fullscreen';
   store.save();
@@ -498,12 +617,9 @@ ipcMain.handle('list:toggle', (_e, pid, itemId) => {
   return l;
 });
 
-ipcMain.handle('intro:set', (_e, seriesId, range) => {
-  if (range) store.data.intros[seriesId] = range;
-  else delete store.data.intros[seriesId];
-  store.save();
-  return store.data.intros;
-});
+// Intros found automatically (intros.js): Yes and No after a Skip.
+ipcMain.handle('intros:confirm', (_e, episodeId) => intros.confirm(episodeId));
+ipcMain.handle('intros:reject', (_e, episodeId, old, answers) => intros.reject(episodeId, old, answers));
 
 ipcMain.handle('subtitle', (_e, fileId, index) => library.subtitle(fileId, index));
 /* ---------- conversions ---------- */
@@ -520,8 +636,13 @@ ipcMain.handle('conv:open-bin', async () => {
   return (await shell.openPath(dir)) ? "Windows couldn't open the folder." : '';
 });
 ipcMain.handle('playing', (_e, fileId) => converter.setPlaying(fileId));
-ipcMain.handle('match:search', (_e, itemId, q) => library.searchMatches(itemId, q));
-ipcMain.handle('match:fix', (_e, itemId, tmdbId) => library.fixMatch(itemId, tmdbId));
+
+/* ---------- copies and versions ---------- */
+ipcMain.handle('copies:bin', (_e, file) => library.copies.moveSpare(file));
+ipcMain.handle('copies:keep', (_e, key) => library.copies.keepBoth(key));
+ipcMain.handle('copies:decide', (_e, key, choice) => library.copies.decideVersion(key, choice));
+ipcMain.handle('match:search', (_e, itemId, q, opts) => library.searchMatches(itemId, q, opts || {}));
+ipcMain.handle('match:fix', (_e, itemId, tmdbId, opts) => library.fixMatch(itemId, tmdbId, opts || {}));
 ipcMain.handle('library:refresh', () => library.refresh());
 ipcMain.handle('library:clear-meta', () => library.clearMetadata());
 // Opens the video folder in File Explorer. Returns an error message, or '' when it worked.
@@ -593,4 +714,43 @@ ipcMain.handle('finder:reveal', (_e, file) => {
 ipcMain.handle('update:state', () => updates.getState());
 ipcMain.handle('update:check', () => updates.check(true));
 ipcMain.handle('update:download', () => updates.download());
+// "Update now anyway": stop the running conversions (they restart after the update) and install.
+ipcMain.handle('update:install-now', () => {
+  converter.cancelRunning();
+  return updates.installNow();
+});
+ipcMain.handle('app:quit', () => bg.requestQuit());
+// The right-click menu switch: adds or removes the menu straight away. Returns a problem, or ''.
+ipcMain.handle('shellmenu:set', async (_e, on) => {
+  if (!shellMenu.available()) return "The right-click menu needs the installed Couchbox (not the portable one).";
+  const err = await (on ? shellMenu.register() : shellMenu.unregister());
+  if (!err) {
+    store.data.settings.shellMenu = !!on;
+    store.save();
+  }
+  return err;
+});
+
+/* ---------- What's new (CHANGELOG.md) ---------- */
+// whatsNew: the version to show the one-time "What's new" card for, after an update. A brand-new
+// install (no profiles yet) doesn't get it; someone updating from before this existed does.
+ipcMain.handle('changelog:get', () => {
+  const changelog = require('./src/main/changelog');
+  const current = require('./package.json').version;
+  const entries = changelog.load();
+  const seen = store.data.lastSeenVersion;
+  let whatsNew = null;
+  if (seen !== current) {
+    if ((seen || store.data.profiles.length) && entries.some((e) => e.version === current)) whatsNew = current;
+    else {
+      store.data.lastSeenVersion = current;
+      store.save();
+    }
+  }
+  return { entries, current, whatsNew };
+});
+ipcMain.handle('changelog:seen', () => {
+  store.data.lastSeenVersion = require('./package.json').version;
+  store.save();
+});
 ipcMain.handle('open-tmdb',() => shell.openExternal('https://www.themoviedb.org/settings/api'));

@@ -11,7 +11,7 @@ const Updates = (() => {
   function renderBanner() {
     const el = banner();
     const show =
-      (st.status === 'available' && st.version !== dismissed) || st.status === 'downloading' || st.status === 'ready' || (st.status === 'error' && st.version);
+      (st.status === 'available' && st.version !== dismissed) || st.status === 'downloading' || st.status === 'waiting' || st.status === 'ready' || (st.status === 'error' && st.version);
     el.hidden = !show;
     if (!show) return;
     let body;
@@ -23,6 +23,12 @@ const Updates = (() => {
     } else if (st.status === 'downloading') {
       body = `<div class="ub-title"><span class="ub-icon">${arrow}</span>Downloading Couchbox ${esc(st.version)}…</div>
         <div class="ub-progress"><div class="ub-bar"><i style="width:${st.percent || 0}%"></i></div><span>${st.percent || 0}%</span></div>`;
+    } else if (st.status === 'waiting') {
+      // Downloaded, but conversions are running: it installs when they finish.
+      body = `<div class="ub-title"><span class="ub-icon">${arrow}</span>Will update when conversions finish</div>
+        <div class="ub-small">Couchbox ${esc(st.version)} is ready. No new conversions start until then.</div>
+        <div class="ub-actions"><button class="btn btn-sm btn-accent" data-ub="anyway">Update now anyway</button></div>
+        <div class="ub-small">Conversions that are running start again after the update.</div>`;
     } else if (st.status === 'ready') {
       body = `<div class="ub-title"><span class="ub-icon">${arrow}</span>Restarting to update…</div>
         <div class="ub-progress"><div class="ub-bar"><i style="width:100%"></i></div><span>100%</span></div>`;
@@ -44,11 +50,13 @@ const Updates = (() => {
       latest: "You're on the latest version.",
       available: `Couchbox ${esc(st.version)} is available.`,
       downloading: `Downloading Couchbox ${esc(st.version)}… ${st.percent || 0}%`,
+      waiting: `Couchbox ${esc(st.version)} will install when the conversions that are running finish.`,
       ready: 'Restarting to update…',
       error: `The update didn't download: ${esc(st.error)}`,
     }[st.status] || '';
-    const btn =
-      st.status === 'available' || st.status === 'error'
+    const btn = st.status === 'waiting'
+      ? '<button class="btn btn-sm btn-accent" data-ub="anyway">Update now anyway</button>'
+      : st.status === 'available' || st.status === 'error'
         ? `<button class="btn btn-sm btn-accent" data-ub="now">${st.portable ? 'Get the new version' : 'Update now'}</button>`
         : `<button class="btn btn-sm btn-ghost" data-ub="check" ${st.status === 'off' || st.status === 'checking' || st.status === 'downloading' || st.status === 'ready' ? 'disabled' : ''}>Check for updates</button>`;
     box.innerHTML = `<p style="margin:0 0 10px;font-size:14px">Version ${esc(st.current || '')}. ${line}</p><div class="inline">${btn}</div>`;
@@ -71,6 +79,8 @@ const Updates = (() => {
     } else if (b.dataset.ub === 'now') {
       dismissed = null;
       apply(await cb.downloadUpdate());
+    } else if (b.dataset.ub === 'anyway') {
+      apply(await cb.installUpdateNow());
     } else if (b.dataset.ub === 'check') {
       dismissed = null;
       apply({ ...st, status: 'checking', error: null });

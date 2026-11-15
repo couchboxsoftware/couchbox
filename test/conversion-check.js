@@ -27,10 +27,13 @@ process.env.COUCHBOX_SPACE_RECHECK_MS = '1500';
 
 // kind: 'fast' = H.264 + E-AC3 5.1 in MKV (the audio needs converting); 'slow' = MPEG-4 Part 2 +
 // MP3 in AVI (the video needs converting, and it becomes .mp4); 'ok' = H.264 + AAC in MP4.
+// Each video gets its own tone: byte-identical files count as copies of one title (copies.js).
+let tone = 300;
 function make(rel, kind, secs = 8) {
   const file = path.join(lib, rel);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const src = ['-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=25:duration=${secs}`, '-f', 'lavfi', '-i', `sine=frequency=330:duration=${secs}`];
+  tone += 30;
+  const src = ['-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=25:duration=${secs}`, '-f', 'lavfi', '-i', `sine=frequency=${tone}:duration=${secs}`];
   const enc = {
     fast: ['-filter_complex', '[1:a]pan=5.1|c0=c0|c1=c0|c2=c0|c3=c0|c4=c0|c5=c0[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'eac3'],
     slow: ['-map', '0:v', '-map', '1:a', '-c:v', 'mpeg4', '-q:v', '5', '-c:a', 'libmp3lame'],

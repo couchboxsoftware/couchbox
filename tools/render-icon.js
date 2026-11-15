@@ -37,6 +37,21 @@ app.whenReady().then(async () => {
       <div style="display:flex;align-items:center;gap:12px"><svg viewBox="5 9 38 34" width="40" height="36">${BRAND.sofaPaths(BRAND.orange, 3)}</svg>${word(30)}</div></div>`;
   const preview = await render(page(`<div style="display:flex;height:100vh">${half('#121212')}${half('#f2f2f2')}</div>`, '#000'), 820, 300);
   fs.writeFileSync(path.join(build, 'icon-preview.png'), preview.toPNG());
+
+  // Tray icons: the bare sofa, coloured by state. Idle is light grey on a dark taskbar and dark
+  // grey on a light one; orange while converting; yellow when there's a warning. Each at 16, 32
+  // (@2x) and 48 (@3x) pixels, so Windows picks the right one for the display's scaling.
+  const trayDir = path.join(build, 'tray');
+  fs.mkdirSync(trayDir, { recursive: true });
+  const TRAY = { 'idle-dark': '#d0d0d0', 'idle-light': '#4a4a4a', busy: BRAND.orange, warn: '#F2C230' };
+  for (const [name, colour] of Object.entries(TRAY)) {
+    for (const [scale, px] of [['', 16], ['@2x', 32], ['@3x', 48]]) {
+      const width = px <= 16 ? 4.6 : px <= 32 ? 4 : 3.6; // thicker lines at small sizes
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="4 6.5 40 40">${BRAND.sofaPaths(colour, width)}</svg>`;
+      const img = await render(page(svg), px, px);
+      fs.writeFileSync(path.join(trayDir, `${name}${scale}.png`), img.toPNG());
+    }
+  }
   console.log('icon written');
   app.quit();
 });

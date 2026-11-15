@@ -9,6 +9,19 @@ const { Tmdb } = require('./tmdb');
 const { JsonStore } = require('./store');
 
 const url = (p) => (p ? pathToFileURL(p).href : null);
+
+// The deepest folder all these folders share.
+function commonDir(dirs) {
+  if (!dirs.length) return '';
+  const split = dirs.map((d) => d.split(path.sep));
+  const out = [];
+  for (let i = 0; i < split[0].length; i++) {
+    const part = split[0][i];
+    if (split.every((s) => s[i] && s[i].toLowerCase() === part.toLowerCase())) out.push(part);
+    else break;
+  }
+  return out.join(path.sep);
+}
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
 async function pool(items, n, fn) {
@@ -118,6 +131,7 @@ class Library {
     }
     this.setStatus({ phase: 'scanning' });
     this.scan = scanLibrary(this.root);
+    this.everScanned = true;
     this.applyAdded();
     this.migrateIds();
     this.emit(true);
@@ -148,6 +162,8 @@ class Library {
     this.afterRefresh(); // formats are known now: the converter can queue what won't play
 
     if (this.tmdb.enabled) await this.matchAll();
+    // Titles are known now: work out spare copies and different versions (copies.js).
+    if (this.copies) await this.copies.update().catch((e) => console.error('[copies]', e));
     await this.makeFrames();
     this.meta.save();
     this.setStatus({ phase: 'idle' });
@@ -232,28 +248,58 @@ class Library {
     this.meta.data.titles[it.id] = details || { noMatch: true };
   }
 
-  async searchMatches(itemId, query) {
+  // Fix match search. opts: { kind: 'film' | 'tv' | 'both', year }. A series can only be matched
+  // to a series (a folder of episodes can't be one film).
+  async searchMatches(itemId, query, opts = {}) {
     const it = this.findItem(itemId);
     if (!it || !this.tmdb.enabled) return [];
-    const results = it.kind === 'film' ? await this.tmdb.searchFilm(query) : await this.tmdb.searchSeries(query);
-    return results.slice(0, 8).map((r) => ({
+    let kind = opts.kind || (it.kind === 'film' ? 'film' : 'tv');
+    if (it.kind === 'series') kind = 'tv';
+    const year = Number(opts.year) || null;
+    const tidyR = (r, k) => ({
       id: r.id,
+      kind: k,
       title: r.title || r.name,
       year: (r.release_date || r.first_air_date || '').slice(0, 4),
       overview: (r.overview || '').slice(0, 160),
       poster: r.poster_path ? 'https://image.tmdb.org/t/p/w92' + r.poster_path : null,
-    }));
+      popularity: r.popularity || 0,
+    });
+    const [films, shows] = await Promise.all([
+      kind !== 'tv' ? this.tmdb.searchFilm(query, year) : [],
+      kind !== 'film' ? this.tmdb.searchSeries(query, year) : [],
+    ]);
+    const all = [...films.slice(0, 8).map((r) => tidyR(r, 'film')), ...shows.slice(0, 8).map((r) => tidyR(r, 'tv'))];
+    // Both: mixed, most popular first (each search is already in TMDB's order).
+    if (kind === 'both') all.sort((a, b) => b.popularity - a.popularity);
+    return all.slice(0, 10);
   }
 
-  async fixMatch(itemId, tmdbId) {
+  // Saves a match picked in Fix match, then tidies the file(s) into Films\ or Series\ (tidy.js).
+  // opts: { kind: 'film' | 'tv', season, episode }. A single film file matched to a series is
+  // that show's episode (season and episode given). Returns { moved, clashes, later }.
+  async fixMatch(itemId, tmdbId, opts = {}) {
     const it = this.findItem(itemId);
-    if (!it) return;
-    this.meta.data.overrides[itemId] = tmdbId;
-    delete this.meta.data.seasons[itemId];
-    await this.matchItem(it, tmdbId);
+    if (!it) return { moved: 0, clashes: [], later: 0 };
+    let target;
+    if (it.kind === 'film' && opts.kind === 'tv') {
+      const d = await this.tmdb.seriesDetails(tmdbId);
+      if (!d) throw new Error("TMDB doesn't have that series any more.");
+      target = { kind: 'tv', title: d.title, tmdbId, season: Number(opts.season) || 1, episode: Number(opts.episode) || 1 };
+    } else {
+      this.meta.data.overrides[itemId] = tmdbId;
+      delete this.meta.data.seasons[itemId];
+      await this.matchItem(it, tmdbId);
+      const t = this.meta.data.titles[itemId] || {};
+      target = { kind: it.kind === 'series' ? 'tv' : 'film', title: t.title || it.title, year: t.year || null, tmdbId };
+    }
     this.meta.save();
     this.emit(true);
-    this.refresh();
+    if (!this.tidy) {
+      this.refresh();
+      return { moved: 0, clashes: [], later: 0 };
+    }
+    return this.tidy.afterMatch(it, target);
   }
 
   async clearMetadata() {
@@ -292,13 +338,21 @@ class Library {
     });
   }
 
+  // A card's id may be that of a copy that was there first (copies.js): it then means the copy
+  // that plays.
   findItem(id) {
+    const alias = this.copies && this.copies.alias.get(id);
+    if (alias) {
+      const f = this.scan.films.find((x) => x.file === alias);
+      if (f) return f;
+    }
     return this.scan.films.find((f) => f.id === id) || this.scan.series.find((s) => s.id === id);
   }
 
   findFile(id) {
-    for (const f of this.scan.films) if (f.id === id) return f;
-    for (const s of this.scan.series) for (const e of s.episodes) if (e.id === id) return e;
+    const alias = this.copies && this.copies.alias.get(id);
+    for (const f of this.scan.films) if (f.id === id || (alias && f.file === alias)) return f;
+    for (const s of this.scan.series) for (const e of s.episodes) if (e.id === id || (alias && e.file === alias)) return e;
     return null;
   }
 
@@ -323,11 +377,15 @@ class Library {
 
   model() {
     const titles = this.meta.data.titles;
-    const films = this.scan.films.map((f) => {
+    // Spare copies aren't shown; the copy that plays shows under its card's id (copies.js).
+    const cp = this.copies;
+    const shown = (f) => !(cp && cp.isSpare(f.file));
+    const idOf = (f) => (cp ? cp.displayId(f) : f.id);
+    const films = this.scan.films.filter(shown).map((f) => {
       const t = titles[f.id] || {};
       const ff = this.fileFields(f);
       return {
-        id: f.id,
+        id: idOf(f),
         kind: 'film',
         title: t.title || f.title,
         year: t.year || f.year,
@@ -338,6 +396,9 @@ class Library {
         certification: t.certification || '',
         kidsSafe: !!t.kidsSafe,
         matched: !!t.tmdbId,
+        noMatch: !!t.noMatch, // TMDB answered "no match" (the Unmatched tab)
+        fileName: path.basename(f.file),
+        folder: path.relative(this.root, path.dirname(f.file)) || '.',
         imported: !!f.imported,
         poster: url(t.poster),
         backdrop: url(t.backdrop) || ff.frame,
@@ -348,12 +409,12 @@ class Library {
       const t = titles[s.id] || {};
       const seasonMeta = this.meta.data.seasons[s.id] || {};
       const bySeason = new Map();
-      for (const e of s.episodes) {
+      for (const e of s.episodes.filter(shown)) {
         const m = (seasonMeta[e.season] && seasonMeta[e.season][e.episode]) || {};
         const ff = this.fileFields(e);
         if (!bySeason.has(e.season)) bySeason.set(e.season, []);
         bySeason.get(e.season).push({
-          id: e.id,
+          id: idOf(e),
           kind: 'episode',
           seriesId: s.id,
           season: e.season,
@@ -380,11 +441,14 @@ class Library {
         certification: t.certification || '',
         kidsSafe: !!t.kidsSafe,
         matched: !!t.tmdbId,
+        noMatch: !!t.noMatch,
+        // The show's folder (the common folder of its episodes), for the Unmatched tab.
+        folder: path.relative(this.root, commonDir(s.episodes.map((e) => path.dirname(e.file)))) || '.',
         poster: url(t.poster),
         backdrop: url(t.backdrop) || firstFrame,
         added: s.added,
         seasons,
-        episodeCount: s.episodes.length,
+        episodeCount: s.episodes.filter(shown).length,
       };
     });
     return { root: this.root, films, series, status: this.status, tmdb: this.tmdb.enabled };

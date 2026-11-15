@@ -13,7 +13,7 @@ const { owner, repo } = pkg.build.publish;
 const branch = 'main';
 
 // Only these go public. Build output, node_modules and design previews stay local.
-const INCLUDE = ['.gitignore', 'LICENSE', 'README.md', 'package.json', 'package-lock.json', 'main.js', 'preload.js', 'dev-app-update.yml', 'build/icon.png', 'renderer', 'src', 'test', 'tools'];
+const INCLUDE = ['.gitignore', 'LICENSE', 'README.md', 'CHANGELOG.md', 'package.json', 'package-lock.json', 'main.js', 'preload.js', 'dev-app-update.yml', 'build/icon.png', 'build/tray', 'build/installer.nsh', 'renderer', 'src', 'test', 'tools'];
 
 function listFiles() {
   const out = [];

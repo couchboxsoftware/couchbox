@@ -207,6 +207,53 @@ class Finder {
     this.stopFlag = true;
   }
 
+  // The right-click menu: the files and folders someone chose in File Explorer. Folders are
+  // searched inside (subfolders too) for videos; there's no length filter, and nothing is
+  // skipped by name (the person chose these). Then the usual checks: TMDB, already in Couchbox,
+  // and the best copy when the same video is there twice. Everything addable is selected.
+  async collect(paths) {
+    this.results = [];
+    this.byId = new Map();
+    const lib = this.getLibrary();
+    const tmdb = lib.tmdb;
+    this._lib = this.libraryIndex(lib);
+    const exts = new Set(['mp4', 'mkv', 'avi', 'mov', 'wmv', 'm4v', 'webm', 'ts', 'mpg', 'mpeg', 'flv'].map((e) => '.' + e));
+    const files = [];
+    const walk = async (p, depth) => {
+      let st;
+      try {
+        st = await fsp.stat(p);
+      } catch (_) {
+        return;
+      }
+      if (st.isDirectory()) {
+        if (depth > 10) return;
+        let entries = [];
+        try {
+          entries = await fsp.readdir(p);
+        } catch (_) {}
+        for (const e of entries) await walk(path.join(p, e), depth + 1);
+      } else if (exts.has(path.extname(p).toLowerCase())) files.push({ file: p, st });
+    };
+    for (const p of paths) await walk(path.resolve(p), 0);
+    for (const { file, st } of files) {
+      const info = await media.probe(file);
+      const r = { id: 'f' + this.results.length, file, ext: path.extname(file).slice(1), size: st.size, mtime: st.mtimeMs, duration: info.duration || 0, height: info.height || 0, width: info.width || 0, state: 'nomatch' };
+      this.results.push(r);
+      this.byId.set(r.id, r);
+      try {
+        await this.identify(r, tmdb);
+      } catch (_) {
+        r.state = 'nomatch';
+      }
+    }
+    // The person picked these, so everything addable is ticked (unrecognised ones too, which go
+    // to Imported\), and stays ticked through the final check before adding.
+    for (const r of this.results) r.userSelected = true;
+    await this.classify();
+    return this.results.length;
+  }
+
   kickChecks(tmdb, stopped) {
     while (this.checking < 4 && this.checkQueue.length && !stopped()) {
       const r = this.checkQueue.shift();
@@ -608,4 +655,4 @@ class Finder {
   }
 }
 
-module.exports = { Finder, ALL_TYPES, fmtLen };
+module.exports = { Finder, ALL_TYPES, fmtLen, fingerprint };

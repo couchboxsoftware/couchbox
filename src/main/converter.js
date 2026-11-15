@@ -86,9 +86,32 @@ class Converter {
   }
 
   stopAll() {
-    for (const j of this.running.values()) j.cancel();
+    for (const j of this.running.values()) {
+      j.cancelled = true;
+      j.cancel();
+    }
     clearInterval(this._binTimer);
     clearInterval(this._spaceTimer);
+  }
+
+  // On quit: delete the half-made files now (FFmpeg may hold them for a moment after being
+  // stopped, so try for up to about a second). Anything left is deleted at the next start.
+  cleanTemps() {
+    const left = [];
+    for (const t of this.state.data.temps) {
+      let gone = false;
+      for (let i = 0; i < 20 && !gone; i++) {
+        try {
+          fs.rmSync(t, { force: true });
+          gone = true;
+        } catch (_) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        }
+      }
+      if (!gone) left.push(t);
+    }
+    this.state.data.temps = left;
+    this.state.save(true);
   }
 
   /* ---------- what needs converting, in order ---------- */
@@ -99,6 +122,8 @@ class Converter {
   lane(f) {
     // Still downloading, unfinished, or not checked yet: leave it alone (see downloads.js).
     if (f.partial || (this.lib().downloads && this.lib().downloads.blocks(f.file))) return null;
+    // A spare copy of something already shown: only the best copy is converted (copies.js).
+    if (this.lib().copies && this.lib().copies.isSpare(f.file)) return null;
     const info = this.lib().meta.data.files[f.file];
     if (!info || !info.duration || !info.videoCodec) return null; // unreadable: nothing to do
     if (this.state.data.forced[f.file]) return 'slow';
@@ -111,8 +136,10 @@ class Converter {
     const lib = this.lib();
     if (!lib.root) return [];
     const st = this.state.data;
+    // Ids as the app shows them (a card may show a copy under the id of the one there first).
+    const did = (f) => (lib.copies ? lib.copies.displayId(f) : f.id);
     const units = [];
-    for (const f of lib.scan.films) units.push({ id: f.id, at: f.added, files: [f] });
+    for (const f of lib.scan.films) units.push({ id: did(f), at: f.added, files: [f] });
     for (const s of lib.scan.series) units.push({ id: s.id, at: Math.min(...s.episodes.map((e) => e.added)), files: s.episodes });
     units.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
     const all = [];
@@ -126,7 +153,7 @@ class Converter {
         else if (this.swapWait.has(f.id)) s = 'finishing';
         else if (fail && fail.size === f.size && fail.mtime === f.mtime) s = 'failed';
         else if (st.skipped[f.file]) s = 'skipped';
-        all.push({ f, id: f.id, unit: u.id, lane, s });
+        all.push({ f, id: did(f), unit: u.id, lane, s });
       }
     // "Queue next": the most recent first. A key is a file id or a title id (all its episodes).
     const out = [];
@@ -158,6 +185,7 @@ class Converter {
 
   async _pump() {
     const lib = this.lib();
+    if (this.hold) return this.snapshot(); // an update is waiting to install: start nothing new
     if (!this.enabled() || this.state.data.paused || !lib.root) {
       this.setBlocked(null);
       return this.snapshot();
@@ -170,6 +198,8 @@ class Converter {
         const next = jobs.find((j) => j.lane === lane && j.s === 'waiting');
         if (!next) break;
         const free = await this.freeSpace();
+        // Paused, turned off or held for an update while the free space was being checked.
+        if (this.hold || !this.enabled() || this.state.data.paused) return this.snapshot();
         const need = Math.ceil(next.f.size * SPACE_FACTOR);
         if (free != null && free < need) {
           this.setBlocked({ fileId: next.id, label: lib.labelFor(next.f), need, free });
@@ -271,7 +301,7 @@ class Converter {
       this.state.save();
       const run = media.convertRun(plan.args, plan.duration, (p) => {
         job.p = p;
-        this.progress(f.id, p);
+        this.progress(j.id, p); // the id the app shows
       });
       job.cancel = run.cancel;
       if (job.cancelled) run.cancel();
@@ -407,7 +437,9 @@ class Converter {
   /* ---------- the player ---------- */
   setPlaying(fileId) {
     const was = this.playing;
-    this.playing = fileId || null;
+    // The app may use a card's id for a copy (copies.js): track the file itself.
+    const f = fileId && this.lib().findFile(fileId);
+    this.playing = f ? f.id : fileId || null;
     if (was && was !== this.playing && this.swapWait.has(was)) this.trySwap(was);
   }
 
@@ -462,6 +494,22 @@ class Converter {
       this.snapshot();
       return 'That original has already been deleted.';
     }
+    // A spare copy or an old version (copies.js): just put it back where it was.
+    if (b.kind === 'copy') {
+      try {
+        if (fs.existsSync(b.orig)) return `Couldn't put it back: there's already a file called ${path.basename(b.orig)} there.`;
+        fs.mkdirSync(path.dirname(b.orig), { recursive: true });
+        fs.renameSync(b.binPath, b.orig);
+      } catch (e) {
+        return "Couldn't put it back: " + e.message;
+      }
+      st.bin = st.bin.filter((x) => x !== b);
+      this.state.save();
+      pruneEmpty(b.binPath);
+      this.lib().refresh();
+      this.snapshot();
+      return '';
+    }
     try {
       if (fs.existsSync(b.newPath)) fs.rmSync(b.newPath, { force: true });
       fs.mkdirSync(path.dirname(b.orig), { recursive: true });
@@ -490,6 +538,31 @@ class Converter {
 
   binDir() {
     return this.root() ? path.join(this.root(), BIN) : null;
+  }
+
+  // Moves a spare copy or an unwanted version into the bin (copies.js). It's deleted after 7 days
+  // and can be restored until then. Returns a problem in words, or ''.
+  binCopy(file, label) {
+    const root = this.root();
+    if (!root || !fs.existsSync(file)) return 'That file has already gone.';
+    if (this.running.size) for (const j of this.running.values()) if (j.file === file) this.cancelPath(file);
+    const binRoot = path.join(root, BIN);
+    let binPath = path.join(binRoot, path.relative(root, file));
+    for (let n = 2; fs.existsSync(binPath); n++) binPath = path.join(path.dirname(binPath), `${path.basename(file, path.extname(file))} (${n})${path.extname(file)}`);
+    let size = 0;
+    try {
+      size = fs.statSync(file).size;
+      fs.mkdirSync(path.dirname(binPath), { recursive: true });
+      hide(binRoot);
+      fs.renameSync(file, binPath);
+    } catch (e) {
+      return "Couldn't move it to the bin: " + e.message;
+    }
+    this.state.data.bin.push({ kind: 'copy', orig: file, binPath, newPath: null, oldId: null, newId: null, label, size, binnedAt: Date.now() });
+    this.state.save();
+    this.lib().refresh();
+    this.snapshot();
+    return '';
   }
 
   /* ---------- buttons ---------- */
@@ -524,6 +597,12 @@ class Converter {
     this.state.data.paused = !!paused;
     this.state.save();
     if (paused) this.cancelRunning();
+    this.pump();
+  }
+
+  // An update is waiting for the running conversions to finish: start no new ones meanwhile.
+  setHold(on) {
+    this.hold = !!on;
     this.pump();
   }
 
@@ -579,7 +658,7 @@ class Converter {
     for (const j of jobs) {
       // With the switch off nothing is waiting: the app just says the file needs converting.
       if (!on && j.s === 'waiting') continue;
-      const run = this.running.get(j.id);
+      const run = this.running.get(j.f.id);
       const row = { id: j.id, unit: j.unit, label: lib.labelFor(j.f), lane: j.lane, s: j.s, p: run ? run.p : j.s === 'finishing' ? 1 : 0 };
       files[j.id] = { s: j.s, p: row.p, lane: j.lane };
       if (j.s === 'failed') failed.push({ ...row, reason: (st.failed[j.f.file] || {}).reason || '' });
@@ -588,7 +667,7 @@ class Converter {
     }
     queue.sort((a, b) => (b.s !== 'waiting') - (a.s !== 'waiting'));
     const now = Date.now();
-    const bin = st.bin.map((b) => ({ key: b.binPath, label: b.label, size: b.size, deleteAt: b.binnedAt + BIN_DAYS * DAY, newId: b.newId }));
+    const bin = st.bin.map((b) => ({ key: b.binPath, label: b.label, size: b.size, deleteAt: b.binnedAt + BIN_DAYS * DAY, newId: b.newId, kind: b.kind || 'original' }));
     // A rough time left: what's left in each lane at the speed seen so far.
     let eta = null;
     for (const lane of ['fast', 'slow']) {
@@ -598,7 +677,7 @@ class Converter {
       for (const j of jobs) {
         if (j.lane !== lane || (j.s !== 'waiting' && j.s !== 'converting')) continue;
         const info = lib.meta.data.files[j.f.file] || {};
-        const run = this.running.get(j.id);
+        const run = this.running.get(j.f.id);
         secs += (info.duration || 0) * (1 - (run ? run.p : 0));
       }
       const t = secs / speed / MAX[lane];
@@ -607,6 +686,7 @@ class Converter {
     return {
       enabled: on,
       paused: !!st.paused,
+      hold: !!this.hold,
       blocked: this.blocked ? { label: this.blocked.label, need: this.blocked.need, free: this.blocked.free } : null,
       converting: queue.filter((r) => r.s === 'converting').length,
       waiting: queue.filter((r) => r.s === 'waiting').length,

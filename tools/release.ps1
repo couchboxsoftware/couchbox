@@ -4,11 +4,13 @@
 
   Examples:
     powershell -File tools\release.ps1 -NoPublish                 # build the current version into dist\ only
-    powershell -File tools\release.ps1 -Bump patch -Notes "Added an Open folder button in Settings."
-    powershell -File tools\release.ps1 -Bump minor -Notes "..."   # 0.3.x -> 0.4.0
+    powershell -File tools\release.ps1 -Bump patch                # 0.3.0 -> 0.3.1, notes from CHANGELOG.md
+    powershell -File tools\release.ps1 -Bump minor                # 0.3.x -> 0.4.0
 
   -Bump patch  0.3.0 -> 0.3.1     -Bump minor  0.3.x -> 0.4.0     (default: keep the version)
-  -Notes       What's new. Shown in the in-app update banner.
+  -Notes       Optional: overrides the notes. Normally they come from the version's entry in
+               CHANGELOG.md (the whole entry on GitHub, the headline in the update banner), and
+               publishing refuses to go ahead without one.
 
   Publishing needs a GitHub token in the GH_TOKEN environment variable (your Windows user
   variables are checked too). The token is never printed.
@@ -38,8 +40,19 @@ try {
   $pkg = Get-Content package.json -Raw | ConvertFrom-Json
   $version = $pkg.version
   if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Version '$version' must be three numbers, like 0.3.1." }
+  # The notes come from this version's entry in CHANGELOG.md (unless -Notes is given): the whole
+  # entry goes on the GitHub release page, and its headline is what the update banner shows.
+  $headline = $Notes
+  if (-not $Notes) {
+    $full = node (Join-Path $root 'tools\release-notes.js') $version
+    if ($LASTEXITCODE -and -not $NoPublish) { throw "Write the CHANGELOG.md entry for $version first (see the template at the top of that file)." }
+    if (-not $LASTEXITCODE) {
+      $Notes = ($full -join "`n").Trim()
+      $headline = ((node (Join-Path $root 'tools\release-notes.js') $version --headline) -join ' ').Trim()
+    }
+  }
   $notesFile = Join-Path $root 'build\release-notes.md'
-  if ($Notes) { [IO.File]::WriteAllText($notesFile, $Notes.Trim() + "`n", (New-Object Text.UTF8Encoding $false)) }
+  if ($headline) { [IO.File]::WriteAllText($notesFile, $headline.Trim() + "`n", (New-Object Text.UTF8Encoding $false)) }
   elseif (Test-Path $notesFile) { Remove-Item $notesFile } # don't reuse last release's notes
   Write-Host "Couchbox $version" -ForegroundColor Cyan
 

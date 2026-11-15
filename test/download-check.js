@@ -29,15 +29,21 @@ process.env.COUCHBOX_DL_POLL_MS = '600';
 process.env.COUCHBOX_CONV_RATE = '0.3';
 
 // Source videos: H.264 + E-AC3 in MKV (so they need a fast conversion once finished).
-function make(name, secs = 20) {
+// Each title gets its own video: byte-identical files count as copies of each other (copies.js).
+function make(name, secs = 20, freq = 300) {
   const file = path.join(src, name);
-  const r = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=25:duration=${secs}`, '-f', 'lavfi', '-i', `sine=frequency=300:duration=${secs}`,
+  const r = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=25:duration=${secs}`, '-f', 'lavfi', '-i', `sine=frequency=${freq}:duration=${secs}`,
     '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', '2500k', '-pix_fmt', 'yuv420p', '-c:a', 'eac3', file]);
   if (r.status !== 0) throw new Error(String(r.stderr));
   return fs.readFileSync(file);
 }
 const A = make('a.mkv');
 const B = make('b.mkv', 12);
+const B2 = make('b2.mkv', 12, 500); // Tide Line S01E01 (B is Fine)
+const G = make('g.mkv', 20, 350); // Grow
+const P = make('p.mkv', 20, 400); // Prealloc
+const E2 = make('e2.mkv', 20, 450); // Tide Line S01E02
+const C = make('c.mkv', 20, 550); // Cancelled
 const old = new Date(Date.now() - 864e5);
 const put = (rel, buf, t = old) => {
   const f = path.join(lib, rel);
@@ -47,11 +53,11 @@ const put = (rel, buf, t = old) => {
 };
 // Already there when Couchbox starts:
 put('Films/Fine (2014).mkv', B); // finished: should just be queued for conversion
-put('Films/Cancelled (2013).mkv', A.subarray(0, Math.floor(A.length * 0.5))); // half, then stopped
+put('Films/Cancelled (2013).mkv', C.subarray(0, Math.floor(C.length * 0.5))); // half, then stopped
 const holes = Buffer.from(A);
 holes.fill(0, Math.floor(A.length * 0.35), Math.floor(A.length * 0.65));
 put('Films/Holes (2016).mkv', holes); // full size, middle never arrived
-put('Series/Tide Line/Season 01/Tide Line - S01E01.mkv', B);
+put('Series/Tide Line/Season 01/Tide Line - S01E01.mkv', B2);
 put('Films/Changes (2015).mkv', A); // finished; will change while converting
 
 const ids = {
@@ -146,11 +152,11 @@ app.on('browser-window-created', (_e, win) => {
 
       // Downloads start while Couchbox is open.
       // Slow enough to look at: 40-45 seconds each.
-      const grow = trickle(path.join(lib, 'Films', 'Grow (2010).mkv'), A, 45000, 90);
+      const grow = trickle(path.join(lib, 'Films', 'Grow (2010).mkv'), G, 45000, 90);
       const tempFile = path.join(lib, 'Films', 'Temp Name (2011).mkv.crdownload');
       const temp = trickle(tempFile, B, 40000, 80);
-      const pre = torrent(path.join(lib, 'Films', 'Prealloc (2012).mkv'), A, 40000, 40);
-      const ep2 = trickle(path.join(lib, 'Series', 'Tide Line', 'Season 01', 'Tide Line - S01E02.mkv'), A, 45000, 90);
+      const pre = torrent(path.join(lib, 'Films', 'Prealloc (2012).mkv'), P, 40000, 40);
+      const ep2 = trickle(path.join(lib, 'Series', 'Tide Line', 'Season 01', 'Tide Line - S01E02.mkv'), E2, 45000, 90);
 
       await until('grow shows', async () => (await dl(ids.grow))?.s === 'downloading');
       await until('a %', async () => (await dl(ids.grow))?.p > 0.1, 12000);
@@ -237,7 +243,7 @@ app.on('browser-window-created', (_e, win) => {
       check('finished downloads join the conversion queue', want.every((id) => q.includes(id)), q.join(' | '));
       check('incomplete ones are not queued', !q.includes(ids.cancelled) && !q.includes(ids.holes));
       // A stopped download that resumes and finishes clears its Incomplete tag.
-      fs.writeFileSync(path.join(lib, 'Films', 'Cancelled (2013).mkv'), A);
+      fs.writeFileSync(path.join(lib, 'Films', 'Cancelled (2013).mkv'), C);
       await until('cancelled finished', async () => !(await dl(ids.cancelled)), 20000);
       check('an Incomplete file that finishes clears by itself', !(await dl(ids.cancelled)));
       check('no errors in the app', errors.length === 0, errors.join(' | '));
