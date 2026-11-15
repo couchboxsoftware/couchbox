@@ -65,6 +65,7 @@ contextBridge.exposeInMainWorld('cb', {
   onConversions: on('conversions'),
   onConvProgress: on('conv-progress'),
   onWarnings: on('warnings'),
+  onDownloads: on('downloads'),
   onFullscreen: on('fullscreen'),
   onAppShown: on('app-shown'),
   onPrefsChanged: on('prefs-changed'),

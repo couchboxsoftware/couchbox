@@ -35,6 +35,18 @@ function seasonOfFolder(name) {
   return m ? parseInt(m[1] || m[2] || m[3], 10) : null;
 }
 
+// Unfinished downloads with a temporary name: "Film (2019).mkv.crdownload" (Chrome, Edge),
+// ".part" (Firefox), ".!qB" (qBittorrent), ".!ut" (uTorrent). Returns the name the file will have
+// once it's finished, or null. They show as Downloading under that name (and its id), so nothing
+// changes when the download completes and the temporary name goes.
+const PARTIAL = /\.(crdownload|part|!qb|!ut|download|partial)$/i;
+function finalName(name) {
+  const m = PARTIAL.exec(name);
+  if (!m) return null;
+  const base = name.slice(0, m.index);
+  return VIDEO_EXT.has(path.extname(base).toLowerCase()) ? base : null;
+}
+
 const SKIP_DIRS =/^(\$recycle\.bin|system volume information|\.|@eadir|extras?|featurettes?|behind the scenes|trailers?)/i;
 const JUNK = /\b(2160p|1080p|720p|576p|480p|4k|uhd|hdr10?|dv|x\.?264|x\.?265|h\.?264|h\.?265|hevc|avc|bluray|blu-ray|brrip|bdrip|bdremux|remux|web[ .-]?dl|webrip|web|hdtv|dvdrip|dvd|aac\d?(\.\d)?|ac3|eac3|ddp?\d?(\.\d)?|dts(-hd)?|truehd|atmos|proper|repack|extended|remastered|unrated|directors? cut|10 ?bit|8 ?bit|multi|subbed|dubbed|nf|amzn|dsnp|hmax)\b.*$/i;
 
@@ -79,6 +91,7 @@ function walk(dir, depth, out) {
       // "<name>.converting.<ext>" is a conversion in progress (see converter.js), not a video yet.
       if (VIDEO_EXT.has(ext) && !/\bsample\b/i.test(e.name) && !/\.converting\.\w+$/i.test(e.name)) out.videos.push(full);
       else if (SUB_EXT.has(ext)) out.subs.push(full);
+      else if (finalName(e.name) && !/\bsample\b/i.test(e.name)) out.videos.push(full);
     }
   }
 }
@@ -135,8 +148,13 @@ function scanLibrary(root) {
   const films = [];
   const seriesMap = new Map();
 
+  // A finished file and its unfinished twin can't both be listed: the finished one wins.
+  const have = new Set(found.videos.map((v) => v.toLowerCase()));
   for (const file of found.videos) {
-    const rel = path.relative(root, file);
+    const fin = finalName(path.basename(file));
+    if (fin && have.has(path.join(path.dirname(file), fin).toLowerCase())) continue;
+    // Unfinished downloads are named, sorted and given ids as the file they'll become.
+    const rel = path.relative(root, fin ? path.join(path.dirname(file), fin) : file);
     const parts = rel.split(path.sep);
     const dirs = parts.slice(0, -1);
     const fileName = parts[parts.length - 1];
@@ -147,7 +165,7 @@ function scanLibrary(root) {
       continue;
     }
     const added = Math.max(stat.birthtimeMs || 0, stat.mtimeMs || 0) || Date.now();
-    const subs = subtitlesFor(file, subsByDir);
+    const subs = subtitlesFor(fin ? path.join(path.dirname(file), fin) : file, subsByDir);
 
     const inSeriesRoot = dirs.length > 0 && SERIES_ROOTS.test(dirs[0]);
     const inFilmRoot = dirs.length > 0 && FILM_ROOTS.test(dirs[0]);
@@ -205,6 +223,7 @@ function scanLibrary(root) {
         episode: ep ? ep.episode : null,
         fileTitle: ep ? ep.title : tidy(path.basename(fileName, path.extname(fileName))),
         file,
+        partial: !!fin,
         size: stat.size,
         mtime: stat.mtimeMs,
         added,
@@ -220,6 +239,7 @@ function scanLibrary(root) {
         title: parsed.title,
         year: parsed.year,
         file,
+        partial: !!fin,
         size: stat.size,
         mtime: stat.mtimeMs,
         added,
@@ -243,4 +263,4 @@ function scanLibrary(root) {
   return { films, series };
 }
 
-module.exports = { scanLibrary, parseTitleYear, episodeInfo, stripSeason, seasonOfFolder, VIDEO_EXT };
+module.exports = { scanLibrary, parseTitleYear, episodeInfo, stripSeason, seasonOfFolder, finalName, VIDEO_EXT };

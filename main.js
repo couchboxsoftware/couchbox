@@ -7,6 +7,7 @@ const { Tmdb } = require('./src/main/tmdb');
 const updater = require('./src/main/updater');
 const { Finder } = require('./src/main/finder');
 const { Converter } = require('./src/main/converter');
+const { Downloads } = require('./src/main/downloads');
 
 if (process.env.COUCHBOX_DATA_DIR) app.setPath('userData', process.env.COUCHBOX_DATA_DIR);
 
@@ -16,6 +17,7 @@ let library = null;
 let updates = null;
 let finder = null;
 let converter = null;
+let downloads = null;
 let avatarDir = null; // profile pictures: <data>\avatars\<profile>-<time>.jpg
 
 const send = (ch, payload) => {
@@ -299,6 +301,17 @@ app.whenReady().then(() => {
   });
   library.setTmdbKey(getKey());
   library.setRoot(store.data.settings.libraryPath);
+  // Files still downloading: shown in purple, and never converted until they're finished.
+  downloads = new Downloads({
+    getLibrary: () => library,
+    onChange: ({ structural }) => {
+      send('downloads', { ...downloads.view(), structural });
+      if (structural) converter.pump();
+    },
+    onStarted: (file) => converter.cancelPath(file),
+  });
+  library.downloads = downloads;
+  downloads.start();
   converter = new Converter({
     dataDir,
     getLibrary: () => library,
@@ -327,6 +340,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   converter && converter.stopAll(); // half-done conversions start again next time
+  downloads && downloads.stop();
   store && store.save(true);
   library && library.meta.save(true);
   app.quit();
@@ -351,6 +365,7 @@ ipcMain.handle('init', () => ({
   kidsAllow: store.data.kidsAllow,
   model: library.model(),
   conversions: converter.view(),
+  downloads: downloads.view(),
   warnings: [...warnings.values()],
 }));
 

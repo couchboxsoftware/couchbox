@@ -16,6 +16,7 @@ const S = {
   pendingRender: false,
   conv: null, // the conversion queue (see conv-ui.js and src/main/converter.js)
   warnings: [], // things that need attention: a yellow "!" on the menu, Settings, the tab and section
+  dl: { files: {} }, // files still downloading or unfinished (see dl-ui.js and src/main/downloads.js)
 };
 
 /* ================= derived data ================= */
@@ -115,6 +116,8 @@ async function boot() {
   cb.onConversions(Conv.onState);
   cb.onConvProgress(Conv.onProgress);
   cb.onWarnings(Conv.onWarnings);
+  S.dl = init.downloads || { files: {} };
+  cb.onDownloads(DL.onState);
   cb.onLibrary((m) => {
     S.model = m;
     if (Player.isOpen()) Player.convChanged(); // a converted file may be ready now
@@ -437,7 +440,8 @@ function cardHTML(item, extra = {}) {
   const bar = extra.pct > 0 ? `<div class="pbar"><i style="width:${Math.round(extra.pct * 100)}%"></i></div>` : '';
   // A film being converted (or waiting) is grey, with an orange line rising as it goes. Series
   // cards stay as they are; their episodes show it inside.
-  const conv = item.kind === 'film' ? Conv.overlay(item.id) : '';
+  // A film still downloading: the same look in purple ("Downloading 38%"), or an Incomplete tag.
+  const conv = item.kind === 'film' ? DL.overlay(item.id) || Conv.overlay(item.id) : '';
   return `<div class="card" data-act="open" data-id="${esc(item.id)}" tabindex="0" aria-label="${esc(item.title)}">${inner}${conv}${conv ? '' : tag}${label}${bar}</div>`;
 }
 
@@ -711,8 +715,8 @@ function episodeRowHTML(e, label, series) {
   const pct = p ? Math.min(1, p.t / p.d) : 0;
   return `<div class="ep" data-act="play-file" data-file="${esc(e.id)}">
     <div class="ep-num">${e.episode}</div>
-    <div class="ep-thumb">${e.still ? `<img src="${e.still}" loading="lazy" alt="" />` : ''}${Conv.overlay(e.id)}<div class="playov"><span>${ICON.play}</span></div>${pct > 0 ? `<div class="pbar"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}</div>
-    <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}</span>${series ? Conv.episodeTag(e, series) : ''}<small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
+    <div class="ep-thumb">${e.still ? `<img src="${e.still}" loading="lazy" alt="" />` : ''}${DL.overlay(e.id) || Conv.overlay(e.id)}<div class="playov"><span>${ICON.play}</span></div>${pct > 0 ? `<div class="pbar"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}</div>
+    <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}</span>${DL.episodeTag(e) || (series ? Conv.episodeTag(e, series) : '')}<small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
     <p class="ep-ov">${esc(e.overview || (watched ? 'Watched' : p && p.t > 10 ? fmtDuration(p.d - p.t) + ' left' : ''))}</p></div>
     <button class="ep-mark ${watched ? 'on' : ''}" data-act="mark" data-file="${esc(e.id)}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${ICON.check}</button>
   </div>`;
@@ -743,12 +747,23 @@ function renderDetails() {
       ? `<div class="d-progress">${info.series ? `<b>${epCode(info.file)}</b>` : ''}<div class="bar"><i style="width:${Math.round(info.pct * 100)}%"></i></div>${fmtDuration(info.p.d - info.p.t)} left</div>`
       : '';
   const fileItem = item.kind === 'film' ? item : null;
+  // Downloading: the Play button becomes the purple pie. For a series it's the episode picked
+  // (clicked, or Play pressed on it), else the one Play would start.
+  let dlFile = null;
+  if (fileItem) dlFile = DL.of(item.id) ? item : null;
+  else {
+    const picked = S.details.pick && allEpisodes(item).find((e) => e.id === S.details.pick);
+    const cand = picked || (info && info.file);
+    dlFile = cand && DL.of(cand.id) ? cand : null;
+  }
+  const pieShown = dlFile && DL.downloading(dlFile.id);
+  const dlLine = dlFile ? DL.line(dlFile, fileItem ? '' : epCode(dlFile)) : '';
   box.innerHTML = `
     <button class="d-close" data-act="close-modal" aria-label="Close">${ICON.x}</button>
     <div class="d-hero">${item.backdrop ? `<img src="${item.backdrop}" alt="" />` : `<div style="position:absolute;inset:0;background:linear-gradient(120deg,hsl(${hashHue(item.title)} 40% 24%),#181818)"></div>`}
       <div class="d-hero-info"><h2 class="d-title">${esc(item.title)}</h2>
         <div class="d-actions">
-          <button class="btn btn-light" data-act="play" data-id="${esc(item.id)}">${ICON.play}${esc(info ? info.label : 'Play')}</button>
+          ${pieShown ? DL.pie(dlFile) : `<button class="btn btn-light" data-act="play" data-id="${esc(item.id)}">${ICON.play}${esc(info ? info.label : 'Play')}</button>`}
           ${info && info.pct > 0 ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="restart" data-id="${esc(item.id)}">Start over</button>` : ''}
           <button class="round" data-act="list" data-id="${esc(item.id)}" title="${inList ? 'Remove from My list' : 'Add to My list'}" aria-label="${inList ? 'Remove from My list' : 'Add to My list'}">${inList ? ICON.check : ICON.plus}</button>
           ${fileItem ? `<button class="round" data-act="mark" data-file="${esc(item.id)}" title="${isWatched(S.progress[item.id]) ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="Toggle watched" style="${isWatched(S.progress[item.id]) ? 'background:var(--good);border-color:var(--good)' : ''}">${ICON.check}</button>` : ''}
@@ -760,7 +775,7 @@ function renderDetails() {
         <div>
           <div class="d-meta">${metaBits(item)}${isNew(item) ? '<span class="badge" style="border-color:var(--accent);color:var(--accent)">NEW</span>' : ''}</div>
           ${progressBar}
-          ${Conv.detailsHTML(item)}
+          ${dlLine || (fileItem && DL.of(item.id) ? '' : Conv.detailsHTML(item))}
           ${item.tagline ? `<div class="d-tagline">${esc(item.tagline)}</div>` : ''}
           <p class="d-overview">${esc(item.overview || (S.model.tmdb ? 'No description found. If this is the wrong title, use "Fix match" below.' : 'Add a TMDB key in Settings to get descriptions and posters.'))}</p>
         </div>
@@ -1017,9 +1032,20 @@ function playFile(fileId) {
   }
 }
 
-function startPlayer(file, series, startAt) {
+// A file still downloading opens its details page (with the pie-shaped Play button) instead;
+// `anyway` (the pie itself) plays what's downloaded so far.
+function startPlayer(file, series, startAt, anyway = false) {
   hideHover();
   stopHeroVideo();
+  if (!anyway && DL.downloading(file.id)) {
+    const id = series ? series.id : file.id;
+    if (!S.details || S.details.id !== id) openDetails(id, series ? file.season : undefined);
+    if (S.details) {
+      S.details.pick = file.id;
+      renderDetails();
+    }
+    return;
+  }
   Player.open({ file, series, startAt, onClose: afterPlayer });
 }
 
@@ -1146,6 +1172,13 @@ document.addEventListener('click', async (e) => {
       if (e.target.closest('[data-act="mark"]')) break;
       playFile(el.dataset.file);
       break;
+    case 'play-partial': {
+      // The pie: play what's downloaded so far.
+      const found = findEpisode(el.dataset.file);
+      const f = found ? found.ep : byId(el.dataset.file);
+      if (f) startPlayer(f, found ? found.series : null, 0, true);
+      break;
+    }
     case 'list':
       toggleList(id);
       break;

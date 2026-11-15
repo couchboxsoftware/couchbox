@@ -37,7 +37,8 @@ async function probe(file) {
   const audio = [...err.matchAll(/Stream #\d+:\d+[^:]*: Audio: (\w+)/g)].map((m) => m[1]);
   const duration = d ? hms(d[1], d[2], d[3]) : 0;
   const videoCodec = v ? v[1] : null;
-  const ext = path.extname(file).toLowerCase();
+  // An unfinished download ("x.mkv.crdownload") is judged by the name it will have.
+  const ext = path.extname(file.replace(/\.(crdownload|part|!qb|!ut|download|partial)$/i, '')).toLowerCase();
   const audioOk = audio.length === 0 || PLAY_AUDIO.has(audio[0]);
   const playable = PLAY_CONTAINERS.has(ext) && !!videoCodec && PLAY_VIDEO.has(videoCodec) && audioOk;
   const width = res ? parseInt(res[1], 10) : 0;
@@ -58,6 +59,21 @@ async function streams(file) {
     return { type: m[1].toLowerCase(), codec: m[2], channels, attachedPic: /attached pic/.test(rest) };
   });
   return { duration: d ? hms(d[1], d[2], d[3]) : 0, streams: list };
+}
+
+// What a file's header says, for the download checks: its length, picture height, and (for
+// MKVs whose tracks carry statistics tags) how many bytes its tracks hold in total.
+async function header(file) {
+  const { err } = await run(['-hide_banner', '-i', file]);
+  const d = err.match(/Duration: (\d+):(\d+):([\d.]+)/);
+  const res = err.match(/Stream #\d+:\d+[^:]*: Video: [^\n]*?, (\d{2,5})x(\d{2,5})/);
+  const bytes = [...err.matchAll(/^\s*NUMBER_OF_BYTES(?:-\w+)?\s*:\s*(\d+)/gm)].reduce((n, m) => n + Number(m[1]), 0);
+  return {
+    duration: d ? hms(d[1], d[2], d[3]) : 0,
+    height: res ? parseInt(res[2], 10) : 0,
+    video: /Stream #\d+:\d+[^:]*: Video:/.test(err),
+    bytes,
+  };
 }
 
 async function grabFrame(file, atSeconds, outFile, width = 480) {
@@ -92,10 +108,16 @@ function convertRun(args, duration, onProgress) {
   return { promise, cancel: () => { killed = true; if (proc) proc.kill(); } };
 }
 
-// Decodes a few seconds from `at` (video and audio) and reports whether it went cleanly.
-async function decodeCheck(file, at) {
-  const { code } = await run(['-hide_banner', '-v', 'error', '-xerror', '-ss', String(Math.max(0, at)), '-i', file, '-t', '4', '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-']);
-  return code === 0;
+// Decodes a few seconds from `at` (video and audio) and reports whether it went cleanly and
+// actually produced pictures (asking for a point past the end of a cut-off file "succeeds" with
+// nothing decoded).
+// `strict` (for checking Couchbox's own conversions) also fails on any decoding error. Without it
+// (for checking downloads), a few errors are fine: older files, like DivX AVIs, report some when
+// playback starts part way in, and still play.
+async function decodeCheck(file, at, strict = true) {
+  const { code, err } = await run(['-hide_banner', ...(strict ? ['-xerror'] : []), '-ss', String(Math.max(0, at)), '-i', file, '-t', '4', '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-']);
+  const frames = [...err.matchAll(/frame=\s*(\d+)/g)].map((m) => Number(m[1]));
+  return code === 0 && frames.length > 0 && frames[frames.length - 1] > 0;
 }
 
 function readText(file) {
@@ -115,4 +137,4 @@ function subtitleToVtt(file) {
   return 'WEBVTT\n\n' + body;
 }
 
-module.exports = { probe, streams, grabFrame, convertRun, decodeCheck, subtitleToVtt, ffmpegPath, PLAY_CONTAINERS, PLAY_VIDEO, PLAY_AUDIO };
+module.exports = { probe, streams, header, grabFrame, convertRun, decodeCheck, subtitleToVtt, ffmpegPath, PLAY_CONTAINERS, PLAY_VIDEO, PLAY_AUDIO };

@@ -57,16 +57,26 @@ make(BROKEN, 'fast');
 make(SLOW, 'slow');
 EPS.forEach((e) => make(e, 'fast'));
 make(LATE, 'fast');
-// "Broken": cut off half way, so its header says 8 seconds but only half is there.
+// "Broken": a whole file whose conversion check is made to fail (a test switch), so the original
+// must stay untouched and it shows "Couldn't convert".
+process.env.COUCHBOX_TEST_FAIL_VERIFY = 'Broken (2002)';
 const bf = path.join(lib, BROKEN);
-fs.truncateSync(bf, Math.floor(fs.statSync(bf).size * 0.45));
 const brokenSize = fs.statSync(bf).size;
+// "Cut Off": half a file, as from a cancelled download. It's marked Incomplete and never converted.
+const CUT = 'Films/Cut Off (2009).mkv';
+make(CUT, 'fast');
+fs.truncateSync(path.join(lib, CUT), Math.floor(fs.statSync(path.join(lib, CUT)).size * 0.45));
+const cutTime = new Date(Date.now() - 3 * 3600e3); // stopped hours ago (cutting it updated the time)
+fs.utimesSync(path.join(lib, CUT), cutTime, cutTime);
 let slowAdded = 0;
 // Set the "added" times again, newest last (birth times are all "now", so mtime decides).
 [OK, FAST, BROKEN, SLOW, ...EPS, LATE].forEach((rel, i) => {
-  const t = new Date(Date.now() + i * 60000);
+  const t = new Date(Date.now() - 2 * 3600e3 + i * 60000); // in the past: not "still downloading"
   fs.utimesSync(path.join(lib, rel), t, t);
-  if (rel === SLOW) slowAdded = fs.statSync(path.join(lib, rel)).mtimeMs;
+  if (rel === SLOW) {
+    const st = fs.statSync(path.join(lib, rel));
+    slowAdded = Math.max(st.birthtimeMs, st.mtimeMs); // how the scanner works out "added"
+  }
 });
 // Downloaded videos are often read-only: the bin must still be able to delete them.
 fs.chmodSync(path.join(lib, FAST), 0o444);
@@ -76,6 +86,7 @@ const oldBin = path.join(lib, '.couchbox-bin', 'Films', 'Long Gone (1999).mkv');
 fs.mkdirSync(path.dirname(oldBin), { recursive: true });
 fs.writeFileSync(oldBin, 'old original');
 fs.writeFileSync(path.join(dataDir, 'conversions.json'), JSON.stringify({
+  paused: true, // until every new file has been checked, so the queue order can be read in full
   bin: [{ orig: path.join(lib, 'Films', 'Long Gone (1999).mkv'), binPath: oldBin, newPath: path.join(lib, 'Films', 'Long Gone (1999).mkv'), oldId: 'film:films\\long gone (1999).mkv', newId: 'film:films\\long gone (1999).mkv', label: 'Long Gone (1999)', size: 12, binnedAt: Date.now() - 8 * 864e5 }],
 }));
 fs.mkdirSync(path.join(dataDir, 'converted'), { recursive: true });
@@ -129,7 +140,12 @@ app.on('browser-window-created', (_e, win) => {
       check('old converted copies were deleted at start-up', !fs.existsSync(path.join(dataDir, 'converted')));
       check('a binned original older than 7 days was deleted at start-up', !fs.existsSync(oldBin));
       await js(`document.querySelector('[data-pid="p1"]').click()`);
-      await until('the queue', async () => (await conv()).converting > 0, 30000);
+      // New files are checked (are they finished downloading?) before they're queued: wait for all
+      // ten (and the cut-off one to be found Incomplete), then read the order and start.
+      await until('the queue', async () => (await conv()).queue.length >= 10 && (await js(`(S.dl.files['film:films\\\\cut off (2009).mkv'] || {}).s`)) === 'incomplete', 60000);
+      const firstOrder = (await conv()).queue.map((r) => r.label);
+      await js('cb.convPause(false)');
+      await until('converting', async () => (await conv()).converting > 0, 10000);
 
       // The queue: in the order added, a series from its first episode; at most 5 fast + 1 slow.
       let peak = { fast: 0, slow: 0 };
@@ -139,9 +155,11 @@ app.on('browser-window-created', (_e, win) => {
         return c;
       };
       let c = await sample();
-      const order = c.queue.map((r) => r.label);
+      const order = firstOrder;
       check('queue order: as added, episodes in order', JSON.stringify(order) === JSON.stringify(['Fast One (2001)', 'Broken (2002)', 'Slow One (2003)', 'Harbour Lights S1:E1', 'Harbour Lights S1:E2', 'Harbour Lights S1:E3', 'Harbour Lights S1:E4', 'Harbour Lights S1:E5', 'Harbour Lights S1:E6', 'Late Arrival (2005)']), order.join(' | '));
       check('the file that plays as it is is not queued', !c.files['film:films\\plays fine (2000).mp4']);
+      const cutState = await js(`(S.dl.files['film:films\\\\cut off (2009).mkv'] || {}).s`);
+      check('a cut-off file is Incomplete, not queued', cutState === 'incomplete' && !c.files['film:films\\cut off (2009).mkv'], JSON.stringify({ cutState, conv: c.files['film:films\\cut off (2009).mkv'] }));
       check('fast and slow sorted right', c.files[fastId].lane === 'fast' && c.files[slowId].lane === 'slow');
 
       // Screens while converting: the home row, the series' episode list, Settings.
@@ -211,6 +229,7 @@ app.on('browser-window-created', (_e, win) => {
       check('slow: shows on kids profiles still', (await js('S.kidsAllow'))[slowNewId] === true);
       check('broken: original untouched', fs.existsSync(bf) && fs.statSync(bf).size === brokenSize);
       check('broken: listed as "Couldn\'t convert" with a reason', c.failed.some((r) => r.label === 'Broken (2002)' && r.reason), JSON.stringify(c.failed));
+      check('cut off: still Incomplete and untouched', (await js(`(S.dl.files['film:films\\\\cut off (2009).mkv'] || {}).s`)) === 'incomplete' && !fs.existsSync(path.join(lib, '.couchbox-bin', CUT)));
       check('no ".converting" files left behind', !fs.readdirSync(path.join(lib, 'Films')).some((n) => /\.converting\./.test(n)));
       const film = await js(`byId(${JSON.stringify(slowNewId)})`);
       check('the new file is playable and keeps the original\'s "added" time', film && film.playable && Math.abs(film.added - slowAdded) < 2, film && `${film.added} vs ${slowAdded}`);

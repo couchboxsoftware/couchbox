@@ -34,8 +34,11 @@ class Library {
     this.imageDir = path.join(dataDir, 'cache', 'images');
     // added: { path: time } keeps a converted file's original "added" time, so it doesn't show
     // as NEW or jump the rows just because its file was rewritten.
-    this.meta = new JsonStore(path.join(dataDir, 'metadata.json'), { files: {}, titles: {}, seasons: {}, overrides: {}, added: {} });
+    // verified: { path: { size, mtime } } files the download checks found complete.
+    this.meta = new JsonStore(path.join(dataDir, 'metadata.json'), { files: {}, titles: {}, seasons: {}, overrides: {}, added: {}, verified: {} });
     if (!this.meta.data.added) this.meta.data.added = {};
+    if (!this.meta.data.verified) this.meta.data.verified = {};
+    this.downloads = null; // set by main.js (downloads.js)
     this.onChange = onChange;
     this.onStatus = onStatus;
     this.root = null;
@@ -57,10 +60,17 @@ class Library {
       try {
         let t;
         this.watcher = fs.watch(this.root, { recursive: true }, (_ev, name) => {
-          // Downloads in progress, conversions in progress and the conversion bin aren't videos.
-          if (name && (/\.(part|tmp|crdownload)$/i.test(name) || /\.converting\.\w+$/i.test(name) || /^\.couchbox-bin\b/i.test(name))) return;
-          clearTimeout(t);
-          t = setTimeout(() => this.refresh(), 2500);
+          // Conversions in progress and the conversion bin aren't videos. Files that are downloading
+          // change all the time: downloads.js checks those itself, so their changes don't rescan.
+          if (name && (/\.tmp$/i.test(name) || /\.converting\.\w+$/i.test(name) || /^\.couchbox-bin\b/i.test(name))) return;
+          if (name && this.downloads && this.downloads.activeRel(this.root).has(name.toLowerCase())) return;
+          // Rescan 2.5 s after the first change, not the last: a file being written changes all
+          // the time, and waiting for quiet would never rescan until it finished.
+          if (t) return;
+          t = setTimeout(() => {
+            t = null;
+            this.refresh();
+          }, 2500);
         });
         this.watcher.on('error', () => {});
       } catch (_) {
@@ -113,10 +123,19 @@ class Library {
     this.emit(true);
 
     const files = [...this.scan.films, ...this.scan.series.flatMap((s) => s.episodes)];
-    const toProbe = files.filter((f) => {
-      const m = this.meta.data.files[f.file];
+    const md = this.meta.data;
+    const changed = (f) => {
+      const m = md.files[f.file];
       return !m || m.size !== f.size || m.mtime !== f.mtime;
-    });
+    };
+    const verified = (f) => {
+      const v = md.verified[f.file];
+      return !!v && v.size === f.size && v.mtime === f.mtime;
+    };
+    // New, changed and temporarily named files may still be downloading: watch them until done.
+    if (this.downloads) this.downloads.track(files.filter((f) => f.partial || (changed(f) && !verified(f)) || this.downloads.has(f.file)), files);
+    // Read each file once while it downloads (for its length), then again when it's finished.
+    const toProbe = files.filter((f) => changed(f) && !(this.downloads && this.downloads.active(f.file) && md.files[f.file]));
     let done = 0;
     if (toProbe.length) this.setStatus({ phase: 'reading', done, total: toProbe.length });
     await pool(toProbe, 3, async (f) => {

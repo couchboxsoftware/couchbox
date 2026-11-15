@@ -97,6 +97,8 @@ class Converter {
   }
 
   lane(f) {
+    // Still downloading, unfinished, or not checked yet: leave it alone (see downloads.js).
+    if (f.partial || (this.lib().downloads && this.lib().downloads.blocks(f.file))) return null;
     const info = this.lib().meta.data.files[f.file];
     if (!info || !info.duration || !info.videoCodec) return null; // unreadable: nothing to do
     if (this.state.data.forced[f.file]) return 'slow';
@@ -293,6 +295,8 @@ class Converter {
 
   // Checks a finished conversion. Returns a problem in words, or '' when it's good.
   async verify(file, plan) {
+    // Tests: pretend the check failed for matching files, to exercise "Couldn't convert".
+    if (process.env.COUCHBOX_TEST_FAIL_VERIFY && file.includes(process.env.COUCHBOX_TEST_FAIL_VERIFY)) return 'Test: the check was made to fail.';
     const info = await media.streams(file);
     if (!info.duration || !info.streams.some((s) => s.type === 'video')) return "The converted file doesn't open.";
     const slack = Math.max(2, plan.duration * 0.005);
@@ -328,6 +332,19 @@ class Converter {
     const lib = this.lib();
     const root = lib.root;
     const f = job.f;
+    // The original changed while it was converting (it was still downloading): throw the
+    // conversion away. It's queued again once the file is finished.
+    let now;
+    try {
+      now = fs.statSync(f.file);
+    } catch (_) {
+      now = null;
+    }
+    if (!now || now.size !== f.size || now.mtimeMs !== f.mtime) {
+      this.swapWait.delete(fileId);
+      this.dropTemp(job);
+      return this.pump();
+    }
     const binRoot = path.join(root, BIN);
     let binPath = path.join(binRoot, path.relative(root, f.file));
     for (let n = 2; fs.existsSync(binPath); n++) binPath = path.join(path.dirname(binPath), `${path.basename(f.file, path.extname(f.file))} (${n})${path.extname(f.file)}`);
@@ -508,6 +525,22 @@ class Converter {
     this.state.save();
     if (paused) this.cancelRunning();
     this.pump();
+  }
+
+  // A file started changing (it's downloading after all): stop converting it and drop the result.
+  cancelPath(file) {
+    for (const j of this.running.values()) {
+      if (j.file !== file) continue;
+      j.cancelled = true;
+      j.cancel();
+    }
+    for (const [id, j] of this.swapWait) {
+      if (j.file !== file) continue;
+      clearTimeout(j.retry);
+      this.swapWait.delete(id);
+      this.dropTemp(j);
+    }
+    this.snapshot();
   }
 
   // Stops what's running (the switch turned off, or Pause all). They start again from the beginning.
