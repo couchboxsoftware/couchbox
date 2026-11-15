@@ -35,6 +35,28 @@ function debounce(fn, ms) {
   };
 }
 
+// Click-off closing. A browser sends "click" to whatever holds both the press and the release,
+// so pressing inside a window and letting go outside it (selecting text, say) looks like a click
+// on the dark area around it. Windows and menus only close when the press AND the release were
+// both outside them; a press outside that ends inside keeps them open too.
+const pointerAt = { down: null, up: null };
+window.addEventListener('pointerdown', (e) => { pointerAt.down = e.target; pointerAt.up = null; }, true);
+window.addEventListener('pointerup', (e) => { pointerAt.up = e.target; }, true);
+// True when the click's press and release both landed outside `inside` (an element or a
+// selector). Clicks with no pointer (keyboard) count by their target only.
+function clickedOff(e, inside) {
+  const isIn = (t) => !!t && !!t.closest && (typeof inside === 'string' ? !!t.closest(inside) : inside.contains(t));
+  if (isIn(e.target)) return false;
+  if (!e.detail) return true; // keyboard-made click
+  return !isIn(pointerAt.down) && !isIn(pointerAt.up);
+}
+// True when the press and the release were both on `el` itself (not something inside it).
+function clickedOn(e, el) {
+  if (e.target !== el) return false;
+  if (!e.detail) return true;
+  return pointerAt.down === el && pointerAt.up === el;
+}
+
 const PROFILE_COLOURS = ['#E8743B', '#3B82C4', '#2E9E6B', '#B4478A', '#C9A227', '#6D5BD0', '#D2453D', '#2AA3A3'];
 
 const svg = (d, extra = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" ${extra}>${d}</svg>`;

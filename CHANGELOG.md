@@ -20,6 +20,13 @@
   "(Settings, App)"; no tests, code or file names.
 -->
 
+## 0.3.9 · 15 Nov 2026
+Windows no longer close when you drag out of them.
+
+### Fixed
+- Windows like a film's details, Fix match and Settings only close when you press and let go outside them, so selecting text and letting go past the edge keeps the window and your selection.
+- The profile menu and the player's menus work the same way.
+
 ## 0.3.8 · 15 Nov 2026
 Couchbox keeps working after you close it.
 

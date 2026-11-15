@@ -1060,9 +1060,9 @@ function afterPlayer() {
 
 document.addEventListener('click', async (e) => {
   const menu = $('#pmenu');
-  if (menu && !e.target.closest('#pmenu') && !e.target.closest('[data-act="profile-menu"]')) menu.remove();
+  if (menu && clickedOff(e, '#pmenu, [data-act="profile-menu"]')) menu.remove();
   const ov = e.target.closest('.overlay');
-  if (ov && e.target === ov && ov.dataset.close) return closeModal();
+  if (ov && ov.dataset.close && clickedOn(e, ov)) return closeModal();
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const act = el.dataset.act;

@@ -568,8 +568,10 @@ const Player = (() => {
     poke();
     const b = e.target.closest('[data-p]');
     if (!b) {
-      if (e.target.closest('.p-pop')) return;
-      if (root.querySelector('.p-pop')) return closePops();
+      if (root.querySelector('.p-pop')) {
+        if (clickedOff(e, '.p-pop')) closePops();
+        return;
+      }
       if (e.target === video) {
         clearTimeout(clickTimer);
         clickTimer = setTimeout(toggle, 200);
