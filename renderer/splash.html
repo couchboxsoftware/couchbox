@@ -52,6 +52,12 @@
   </g>
 </svg>
 <script src="brand.js"></script>
+<script src="sounds.js"></script>
+<script>
+  // The opening organ ("picture palace"), if opening sounds are on (main.js passes sound + vol).
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('sound') === '1') setTimeout(() => Sounds.play('organ', Number(qs.get('vol') || 0.5)), 120);
+</script>
 <script>
   const NS = 'http://www.w3.org/2000/svg';
   const mark = document.getElementById('mark');

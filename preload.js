@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('cb', {
   setTmdbKey: invoke('set-tmdb-key'),
   setSettings: invoke('settings:set'),
   saveProfiles: invoke('profiles:save'),
+  chooseAvatar: invoke('avatar:choose'),
+  saveAvatar: invoke('avatar:save'),
   setLastProfile: invoke('profiles:last'),
   getProgress: invoke('progress:get'),
   setProgress: invoke('progress:set'),
@@ -55,4 +57,5 @@ contextBridge.exposeInMainWorld('cb', {
   onStatus: on('status'),
   onConvertProgress: on('convert-progress'),
   onFullscreen: on('fullscreen'),
+  onAppShown: on('app-shown'),
 });

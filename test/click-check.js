@@ -9,7 +9,7 @@ const { app } = require('electron');
 const out = process.env.COUCHBOX_CLICK_OUT;
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-click-'));
 process.env.COUCHBOX_DATA_DIR = dataDir;
-fs.writeFileSync(path.join(dataDir, 'couchbox-data.json'), JSON.stringify({ settings: { libraryPath: process.env.COUCHBOX_LIBRARY }, profiles: [] }));
+fs.writeFileSync(path.join(dataDir, 'couchbox-data.json'), JSON.stringify({ settings: { libraryPath: process.env.COUCHBOX_LIBRARY, ...require('./quiet').TEST_SETTINGS }, profiles: [] }));
 fs.mkdirSync(out, { recursive: true });
 
 app.on('browser-window-created', (_e, win) => {

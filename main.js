@@ -14,6 +14,7 @@ let store = null;
 let library = null;
 let updates = null;
 let finder = null;
+let avatarDir = null; // profile pictures: <data>\avatars\<profile>-<time>.jpg
 
 const send = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
@@ -42,10 +43,54 @@ function setKey(key) {
   store.save();
 }
 
+/* ---------- how the window opens ---------- */
+// "When Couchbox opens": window (1400 x 860, centred), maximised, fullscreen (the default) or
+// remember (size, position, maximised and fullscreen as they were when the app last closed).
+const OPEN_MODES = ['window', 'maximized', 'fullscreen', 'remember'];
+const openMode = () => (OPEN_MODES.includes(store.data.settings.openMode) ? store.data.settings.openMode : 'fullscreen');
+
+// The remembered bounds, if they're still on a connected screen (a monitor may have gone).
+function rememberedBounds() {
+  const w = store.data.settings.windowState;
+  const b = w && w.bounds;
+  if (!b || !(b.width >= 900 && b.height >= 600)) return null;
+  const { screen } = require('electron');
+  const area = screen.getDisplayMatching(b).workArea;
+  const overlapX = Math.min(b.x + b.width, area.x + area.width) - Math.max(b.x, area.x);
+  const overlapY = Math.min(b.y + b.height, area.y + area.height) - Math.max(b.y, area.y);
+  return overlapX > 200 && overlapY > 100 ? b : null;
+}
+
+function saveWindowState() {
+  if (!win || win.isDestroyed()) return;
+  store.data.settings.windowState = { bounds: win.getNormalBounds(), maximized: win.isMaximized(), fullscreen: win.isFullScreen() };
+  store.save(true);
+}
+
+// Called as the splash hands over: put the hidden window into the chosen state, then show it.
+function showMainWindow() {
+  const mode = openMode();
+  const saved = store.data.settings.windowState || {};
+  const full = mode === 'fullscreen' || (mode === 'remember' && saved.fullscreen);
+  const max = mode === 'maximized' || (mode === 'remember' && saved.maximized && !saved.fullscreen);
+  if (full) win.setFullScreen(true);
+  else if (max) win.maximize();
+  win.show();
+  win.focus();
+  send('app-shown', { openingSounds: store.data.settings.openingSounds !== false, soundVolume: soundVolume() });
+}
+
+const soundVolume = () => {
+  const v = store.data.settings.soundVolume;
+  return typeof v === 'number' ? Math.min(1, Math.max(0, v)) : 0.5;
+};
+
 function createWindow() {
+  const b = openMode() === 'remember' ? rememberedBounds() : null;
   win = new BrowserWindow({
-    width: 1400,
-    height: 860,
+    width: b ? b.width : 1400,
+    height: b ? b.height : 860,
+    ...(b ? { x: b.x, y: b.y } : { center: true }),
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#121212',
@@ -59,10 +104,21 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      autoplayPolicy: 'no-user-gesture-required', // the opening "bloom" plays before any click
     },
   });
-  // The main window stays hidden until the splash hands over (see finishSplash).
+  // Restore the exact remembered bounds (the constructor's size can come out a few pixels off
+  // with Windows display scaling, which would make the window creep larger every launch).
+  if (b) {
+    win.setBounds(b);
+    // Windows can still land a pixel or two out; measure and correct once.
+    const a = win.getBounds();
+    if (a.width !== b.width || a.height !== b.height || a.x !== b.x || a.y !== b.y)
+      win.setBounds({ x: b.x - (a.x - b.x), y: b.y - (a.y - b.y), width: b.width - (a.width - b.width), height: b.height - (a.height - b.height) });
+  }
+  // The main window stays hidden until the splash hands over (see showMainWindow).
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.on('close', saveWindowState);
   win.on('enter-full-screen', () => send('fullscreen', true));
   win.on('leave-full-screen', () => send('fullscreen', false));
   win.webContents.on('before-input-event', (e, input) => {
@@ -102,7 +158,7 @@ function createSplash() {
     backgroundColor: '#00000000',
     title: 'Couchbox',
     icon: path.join(__dirname, 'build', 'icon.png'),
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, autoplayPolicy: 'no-user-gesture-required' },
   });
   splash.once('ready-to-show', () => {
     splash.show();
@@ -114,7 +170,9 @@ function createSplash() {
   });
   splash.webContents.on('will-navigate', (e) => e.preventDefault());
   splash.on('closed', () => (splash = null));
-  splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'), { query: { v: require('./package.json').version } });
+  // The splash plays the opening organ itself, if opening sounds are on.
+  const sound = store.data.settings.openingSounds !== false ? '1' : '0';
+  splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'), { query: { v: require('./package.json').version, sound, vol: String(soundVolume()) } });
 }
 
 function runSplash(code) {
@@ -134,10 +192,7 @@ function maybeFinishSplash() {
     setTimeout(() => {
       runSplash('window.fadeOut && fadeOut()');
       setTimeout(() => {
-        if (win && !win.isDestroyed()) {
-          win.show();
-          win.focus();
-        }
+        if (win && !win.isDestroyed()) showMainWindow();
         if (splash && !splash.isDestroyed()) splash.close();
         updates.start(); // first update check a few seconds after the app is up
       }, 420);
@@ -153,12 +208,7 @@ ipcMain.on('app-ready', () => {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   updates = updater.create({ send });
-  createSplash();
-  // Safety net: never leave someone staring at the splash.
-  setTimeout(() => {
-    boot.rendererReady = boot.scanned = true;
-    maybeFinishSplash();
-  }, 15000);
+  // Settings are read first: the splash needs to know whether to play its sound.
   const dataDir = app.getPath('userData');
   store = new JsonStore(path.join(dataDir, 'couchbox-data.json'), {
     settings: { libraryPath: null, volume: 1, autoplayNext: true, previews: true },
@@ -169,6 +219,13 @@ app.whenReady().then(() => {
     kidsAllow: {},
     lastProfile: null,
   });
+  avatarDir = path.join(dataDir, 'avatars');
+  createSplash();
+  // Safety net: never leave someone staring at the splash.
+  setTimeout(() => {
+    boot.rendererReady = boot.scanned = true;
+    maybeFinishSplash();
+  }, 15000);
   splashStep('reading settings', 'ok');
   library = new Library(dataDir, {
     onChange: (model) => {
@@ -209,11 +266,15 @@ app.on('window-all-closed', () => {
 // ---- IPC ----
 const publicSettings = () => {
   const s = store.data.settings;
-  return { libraryPath: s.libraryPath, hasTmdbKey: !!getKey(), volume: s.volume, autoplayNext: s.autoplayNext !== false, previews: s.previews !== false };
+  return {
+    libraryPath: s.libraryPath, hasTmdbKey: !!getKey(), volume: s.volume, autoplayNext: s.autoplayNext !== false, previews: s.previews !== false,
+    openMode: openMode(), openingSounds: s.openingSounds !== false, soundVolume: soundVolume(),
+  };
 };
 
 ipcMain.handle('init', () => ({
   settings: publicSettings(),
+  avatarBase: require('url').pathToFileURL(avatarDir).href + '/',
   profiles: store.data.profiles,
   lastProfile: store.data.lastProfile,
   intros: store.data.intros,
@@ -254,14 +315,55 @@ ipcMain.handle('set-tmdb-key', async (_e, key) => {
 });
 
 ipcMain.handle('settings:set', (_e, patch) => {
-  const allowed = ['volume', 'autoplayNext', 'previews'];
+  const allowed = ['volume', 'autoplayNext', 'previews', 'openingSounds', 'soundVolume', 'openMode'];
   for (const k of allowed) if (k in patch) store.data.settings[k] = patch[k];
+  if ('openMode' in patch && !OPEN_MODES.includes(patch.openMode)) store.data.settings.openMode = 'fullscreen';
   store.save();
   return publicSettings();
 });
 
+/* ---------- profile pictures ---------- */
+const AVATAR_TYPES = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'];
+const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp' };
+
+// Opens a picture for the cropper. It comes back as a data URL: the cropper draws it on a
+// canvas and reads the pixels back, which file:// images wouldn't allow.
+ipcMain.handle('avatar:choose', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Choose a profile picture', properties: ['openFile'], filters: [{ name: 'Pictures', extensions: AVATAR_TYPES }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const file = r.filePaths[0];
+  const ext = path.extname(file).slice(1).toLowerCase();
+  if (!MIME[ext]) return { error: 'Choose a JPG, PNG, WebP, GIF or BMP picture.' };
+  const size = fs.statSync(file).size;
+  if (size > 40 * 1024 * 1024) return { error: 'That picture is too big (over 40 MB).' };
+  return { dataUrl: `data:${MIME[ext]};base64,${fs.readFileSync(file).toString('base64')}` };
+});
+
+// Saves the cropped 200 x 200 JPEG. A new name each time, so the app never shows an old copy.
+ipcMain.handle('avatar:save', (_e, profileId, dataUrl) => {
+  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl || '');
+  if (!m || !/^[\w-]+$/.test(profileId)) return null;
+  fs.mkdirSync(avatarDir, { recursive: true });
+  const name = `${profileId}-${Date.now().toString(36)}.jpg`;
+  fs.writeFileSync(path.join(avatarDir, name), Buffer.from(m[1], 'base64'));
+  return name;
+});
+
+// Deletes picture files no profile uses any more (replaced, removed, or the profile deleted).
+function cleanAvatars() {
+  const used = new Set(store.data.profiles.map((p) => p.avatar).filter(Boolean));
+  let files = [];
+  try {
+    files = fs.readdirSync(avatarDir);
+  } catch (_) {}
+  for (const f of files) if (!used.has(f)) fs.rmSync(path.join(avatarDir, f), { force: true });
+}
+
 ipcMain.handle('profiles:save', (_e, profiles) => {
+  // A picture is only ever a plain file name inside the avatars folder.
+  for (const p of profiles) if (p.avatar && !/^[\w-]+\.jpg$/.test(p.avatar)) delete p.avatar;
   store.data.profiles = profiles;
+  cleanAvatars();
   const ids = new Set(profiles.map((p) => p.id));
   for (const k of Object.keys(store.data.progress)) if (!ids.has(k)) delete store.data.progress[k];
   for (const k of Object.keys(store.data.lists)) if (!ids.has(k)) delete store.data.lists[k];

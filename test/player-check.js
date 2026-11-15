@@ -11,7 +11,7 @@ fs.mkdirSync(out, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-player-'));
 process.env.COUCHBOX_DATA_DIR = dataDir;
 fs.writeFileSync(path.join(dataDir, 'couchbox-data.json'), JSON.stringify({
-  settings: { libraryPath: process.env.COUCHBOX_LIBRARY, volume: 0, autoplayNext: true, previews: false },
+  settings: { libraryPath: process.env.COUCHBOX_LIBRARY, volume: 0, autoplayNext: true, previews: false, ...require('./quiet').TEST_SETTINGS },
   profiles: [{ id: 'p1', name: 'Sam', color: '#2E9E6B', kids: false }],
 }));
 

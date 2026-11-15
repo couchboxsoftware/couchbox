@@ -15,7 +15,7 @@ fs.mkdirSync(out, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-finder-'));
 process.env.COUCHBOX_DATA_DIR = dataDir;
 fs.writeFileSync(path.join(dataDir, 'couchbox-data.json'), JSON.stringify({
-  settings: { libraryPath: lib, tmdbKey: 'test-key', previews: false, finderWhere: { whole: false, quick: [], folders: [pc] } },
+  settings: { libraryPath: lib, tmdbKey: 'test-key', previews: false, finderWhere: { whole: false, quick: [], folders: [pc] }, ...require('./quiet').TEST_SETTINGS },
   profiles: [{ id: 'p1', name: 'Sam', color: '#2E9E6B', kids: false }, { id: 'p3', name: 'Kids', color: '#C9A227', kids: true }],
 }));
 require('./fake-tmdb');

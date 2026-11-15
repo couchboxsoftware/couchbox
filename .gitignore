@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# private notes and lists, never uploaded
+research/
 # made by tools/release.ps1 for each release
 build/release-notes.md
 # design previews (regenerate with the tools/ scripts)

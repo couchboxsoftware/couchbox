@@ -19,7 +19,7 @@ fs.mkdirSync(out, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-upd-'));
 process.env.COUCHBOX_DATA_DIR = dataDir;
 fs.writeFileSync(path.join(dataDir, 'couchbox-data.json'), JSON.stringify({
-  settings: { libraryPath: process.env.COUCHBOX_LIBRARY },
+  settings: { libraryPath: process.env.COUCHBOX_LIBRARY, ...require('./quiet').TEST_SETTINGS },
   profiles: [{ id: 'p1', name: 'Sam', color: '#2E9E6B', kids: false }],
 }));
 
@@ -30,7 +30,7 @@ const server = http.createServer((req, res) => {
   const file = path.join(dir, name);
   if (name === 'latest.yml') {
     let yml = fs.readFileSync(file, 'utf8').replace(/^version: .*$/m, `version: ${FAKE_VERSION}`);
-    yml += `releaseNotes: "Faster start-up and a new update banner."\n`;
+    if (!/^releaseNotes:/m.test(yml)) yml += `releaseNotes: "Faster start-up and a new update banner."\n`;
     res.writeHead(200, { 'Content-Type': 'text/yaml' });
     return res.end(yml);
   }

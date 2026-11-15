@@ -17,6 +17,7 @@ fs.writeFileSync(
       autoplayNext: true,
       previews: true,
       ...(process.env.COUCHBOX_FAKE_IMAGES ? { tmdbKey: 'test-key' } : {}),
+      ...require('./quiet').TEST_SETTINGS,
     },
     profiles: [
       { id: 'p1', name: 'Sam', color: '#2E9E6B', kids: false },

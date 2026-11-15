@@ -101,6 +101,7 @@ function metaBits(item) {
 async function boot() {
   const init = await cb.init();
   S.settings = init.settings;
+  S.avatarBase = init.avatarBase;
   S.profiles = init.profiles;
   S.intros = init.intros;
   S.kidsAllow = init.kidsAllow || {};
@@ -114,6 +115,8 @@ async function boot() {
   showStatus(S.model.status || { phase: 'idle' });
   // body.is-full shows the "exit full screen" button in the top bar and lets Esc leave fullscreen.
   cb.onFullscreen((on) => document.body.classList.toggle('is-full', on));
+  // The "warm bloom" as the main window appears (it overlaps the splash organ's tail on purpose).
+  cb.onAppShown((s) => s.openingSounds && Sounds.play('bloom', s.soundVolume));
   cb.windowState().then((w) => document.body.classList.toggle('is-full', w.fullscreen));
   Updates.init();
   render();
@@ -203,8 +206,14 @@ function renderSetup(app, err) {
 }
 
 /* ---------- profiles ---------- */
+// A profile's picture (if it has one) or its coloured letter.
+const avatarUrl = (p) => (p.avatar ? S.avatarBase + encodeURIComponent(p.avatar) : null);
+function avatarInner(p) {
+  const url = avatarUrl(p);
+  return url ? `<img class="av-img" src="${url}" alt="" draggable="false" />` : esc((p.name || '?').trim().charAt(0).toUpperCase());
+}
 function avatarHTML(p, cls = 'avatar') {
-  return `<div class="${cls}" style="background:${p.color}">${esc((p.name || '?').trim().charAt(0).toUpperCase())}</div>`;
+  return `<div class="${cls}" style="background:${p.color}">${avatarInner(p)}</div>`;
 }
 
 function renderProfiles(app) {
@@ -221,7 +230,7 @@ function renderProfiles(app) {
       ${S.profiles
         .map(
           (p) => `<button class="pf" data-act="${S.managing ? 'edit-profile' : 'pick-profile'}" data-pid="${p.id}">
-            <div class="pic" style="background:${p.color}">${esc(p.name.trim().charAt(0).toUpperCase())}${p.kids ? '<span class="kids">KIDS</span>' : ''}${S.managing ? `<div class="edit">${ICON.pencil}</div>` : ''}</div>
+            <div class="pic" style="background:${p.color}">${avatarInner(p)}${p.kids ? '<span class="kids">KIDS</span>' : ''}${S.managing ? `<div class="edit">${ICON.pencil}</div>` : ''}</div>
             <span>${esc(p.name)}</span></button>`
         )
         .join('')}
@@ -235,6 +244,12 @@ function openProfileEditor(pid, first = false) {
   const existing = S.profiles.find((p) => p.id === pid);
   const p = existing ? { ...existing } : { id: 'p' + Date.now().toString(36), name: '', color: PROFILE_COLOURS[S.profiles.length % PROFILE_COLOURS.length], kids: false };
   const root = $('#modal-root');
+  // The picture being edited: undefined = unchanged, null = removed, a data URL = newly cropped.
+  // Nothing is saved until Save.
+  let pending;
+  const showsPicture = () => (pending === undefined ? !!p.avatar : !!pending);
+  const avInner = () =>
+    typeof pending === 'string' ? `<img class="av-img" src="${pending}" alt="" />` : pending === null ? esc((p.name || '?').charAt(0).toUpperCase()) : avatarInner(p);
   const draw = (err) => {
     root.innerHTML = `
     <div class="overlay" data-close="${first ? '' : '1'}">
@@ -242,7 +257,11 @@ function openProfileEditor(pid, first = false) {
         <h2>${first ? 'Create your profile' : existing ? 'Edit profile' : 'Add profile'}</h2>
         <p>${first ? 'Each person gets their own Continue watching, progress and list.' : 'Profiles keep progress and lists separate.'}</p>
         <div style="display:flex;gap:20px;align-items:flex-start">
-          <div class="avatar" id="pe-av" style="width:96px;height:96px;font-size:44px;background:${p.color};border-radius:8px">${esc((p.name || '?').charAt(0).toUpperCase())}</div>
+          <div class="pe-left">
+            <div class="avatar" id="pe-av" style="width:96px;height:96px;font-size:44px;background:${p.color};border-radius:8px">${avInner()}</div>
+            <button class="pe-link" id="pe-choose">${ICON.image}${showsPicture() ? 'Change picture' : 'Choose picture…'}</button>
+            ${showsPicture() ? '<button class="pe-link" id="pe-rmpic">Remove picture</button>' : ''}
+          </div>
           <div style="flex:1">
             <div class="field"><label for="pe-name">Name</label><input class="input" id="pe-name" maxlength="20" value="${esc(p.name)}" placeholder="Sam" /></div>
             ${err ? `<div class="err" style="margin:-10px 0 12px">${esc(err)}</div>` : ''}
@@ -261,8 +280,26 @@ function openProfileEditor(pid, first = false) {
     name.focus();
     name.addEventListener('input', () => {
       p.name = name.value;
-      $('#pe-av').textContent = (p.name || '?').charAt(0).toUpperCase();
+      if (!showsPicture()) $('#pe-av').textContent = (p.name || '?').charAt(0).toUpperCase();
     });
+    $('#pe-choose').onclick = async () => {
+      const r = await cb.chooseAvatar();
+      if (!r) return;
+      if (r.error) return toast(r.error, 5000);
+      const out = await Cropper.open(r.dataUrl);
+      if (out && out.error) return toast(out.error, 5000);
+      if (typeof out === 'string') {
+        p.name = name.value;
+        pending = out;
+        draw();
+      }
+    };
+    if ($('#pe-rmpic'))
+      $('#pe-rmpic').onclick = () => {
+        p.name = name.value;
+        pending = null;
+        draw();
+      };
     name.addEventListener('keydown', (e) => e.key === 'Enter' && $('#pe-save').click());
     $$('.swatch', root).forEach((b) =>
       b.addEventListener('click', () => {
@@ -276,9 +313,14 @@ function openProfileEditor(pid, first = false) {
     $('#pe-save').onclick = async () => {
       p.name = name.value.trim();
       if (!p.name) return draw('Enter a name');
+      if (typeof pending === 'string') {
+        const file = await cb.saveAvatar(p.id, pending);
+        if (!file) return draw("Couldn't save the picture. Try another one.");
+        p.avatar = file;
+      } else if (pending === null) delete p.avatar;
       const list = existing ? S.profiles.map((x) => (x.id === p.id ? p : x)) : [...S.profiles, p];
       S.profiles = await cb.saveProfiles(list);
-      if (S.profile && S.profile.id === p.id) S.profile = p;
+      if (S.profile && S.profile.id === p.id) S.profile = S.profiles.find((x) => x.id === p.id) || p;
       closeModal();
       if (first) return pickProfile(p.id);
       render();
@@ -802,6 +844,19 @@ function openSettings(err, tab = 'general') {
       <label class="toggle"><span class="t-text"><b>Autoplay next episode</b><small>Starts the next episode after a short countdown.</small></span><span class="switch"><input type="checkbox" data-setting="autoplayNext" ${st.autoplayNext ? 'checked' : ''} /><span></span></span></label>
       <label class="toggle"><span class="t-text"><b>Previews</b><small>Plays muted clips when you hover over a title or wait on the banner.</small></span><span class="switch"><input type="checkbox" data-setting="previews" ${st.previews ? 'checked' : ''} /><span></span></span></label>
     </div>
+    <div class="settings-section"><h3>Sounds</h3>
+      <label class="toggle"><span class="t-text"><b>Opening sounds</b><small>An organ while Couchbox starts and a warm chord when it opens.</small></span><span class="switch"><input type="checkbox" data-setting="openingSounds" ${st.openingSounds ? 'checked' : ''} /><span></span></span></label>
+      ${S.profile ? `<label class="toggle"><span class="t-text"><b>Click sounds for ${esc(S.profile.name)}</b><small>A quiet tap on buttons, tabs and cards. Each profile has its own setting.</small></span><span class="switch"><input type="checkbox" id="set-clicks" ${S.profile.clicks !== false ? 'checked' : ''} /><span></span></span></label>` : ''}
+      <div class="toggle"><span class="t-text"><b>Volume</b><small>For all Couchbox sounds. Videos have their own volume.</small></span><span class="snd-vol"><input type="range" id="set-sound-vol" min="0" max="1" step="0.05" value="${st.soundVolume}" aria-label="Sound volume" /><span id="set-sound-pct">${Math.round(st.soundVolume * 100)}%</span></span></div>
+    </div>
+    <div class="settings-section"><h3>When Couchbox opens</h3>
+      <div class="open-modes" role="radiogroup" aria-label="When Couchbox opens">${[
+        ['window', 'Window', 'A 1400 × 860 window in the middle of the screen.'],
+        ['maximized', 'Maximised', 'Fills the screen, with the title bar.'],
+        ['fullscreen', 'Full screen', 'No title bar or taskbar. Esc or F11 leaves it.'],
+        ['remember', 'Remember last', 'Opens exactly as you left it.'],
+      ].map(([v, l, d]) => `<label class="open-mode"><input type="radio" name="open-mode" value="${v}" ${st.openMode === v ? 'checked' : ''} /><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
+    </div>
     <div class="settings-section"><h3>Updates</h3><div id="settings-updates"></div></div>
     <div class="row-btns"><button class="btn btn-sm btn-accent" data-act="close-modal">Done</button></div>
   </div></div>`;
@@ -811,7 +866,51 @@ function openSettings(err, tab = 'general') {
       S.settings = await cb.setSettings({ [c.dataset.setting]: c.checked });
     })
   );
+  const clicks = $('#set-clicks');
+  if (clicks)
+    clicks.addEventListener('change', async () => {
+      const id = S.profile.id;
+      S.profiles = await cb.saveProfiles(S.profiles.map((p) => (p.id === id ? { ...p, clicks: clicks.checked } : p)));
+      S.profile = S.profiles.find((p) => p.id === id);
+    });
+  const vol = $('#set-sound-vol');
+  const saveVol = debounce(async (v) => (S.settings = await cb.setSettings({ soundVolume: v })), 300);
+  vol.addEventListener('input', () => {
+    const v = Number(vol.value);
+    S.settings.soundVolume = v;
+    $('#set-sound-pct').textContent = Math.round(v * 100) + '%';
+    Sounds.play('tap', v); // a preview at the new level
+    saveVol(v);
+  });
+  $$('input[name="open-mode"]').forEach((r) =>
+    r.addEventListener('change', async () => {
+      if (r.checked) S.settings = await cb.setSettings({ openMode: r.value });
+    })
+  );
 }
+
+/* ---------- click sounds ---------- */
+// The soft tap on buttons, tabs, menus, cards, profiles, My list and Settings toggles. Never while
+// the player is open. Uses the current profile's setting (or the last profile's on the profile
+// screen). Label + checkbox clicks arrive as two events, so close repeats are ignored.
+let lastTap = 0;
+function clicksOn() {
+  const p = S.profile || S.profiles.find((x) => x.id === S.lastProfile);
+  return !p || p.clicks !== false;
+}
+document.addEventListener(
+  'click',
+  (e) => {
+    if (!S.settings || Player.isOpen()) return;
+    const hit = e.target.closest('button, a, [data-act], .card, [role="tab"], label.toggle, label.f-check, label.open-mode, .f-choice, input[type="checkbox"], input[type="radio"]');
+    if (!hit || hit.disabled || hit.closest('#player')) return;
+    const now = performance.now();
+    if (now - lastTap < 80) return;
+    lastTap = now;
+    if (clicksOn()) Sounds.play('tap', S.settings.soundVolume);
+  },
+  true
+);
 
 /* ---------- profile menu ---------- */
 function toggleProfileMenu() {
