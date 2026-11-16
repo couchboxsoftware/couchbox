@@ -116,7 +116,9 @@ app.on('browser-window-created', (_e, win) => {
       let asks = 0;
       const orig = intros().ask.bind(intros());
       intros().ask = (m, t) => (asks++, orig(m, t));
-      await until(() => ['1', '2', '3', '4', '5'].every((n) => ep(E(n))) && ep(L(1)) && ep(L(2)) && ep(id(S3 + '1.mkv')));
+      // Every season checked (on a busy PC the later ones can take a while).
+      await until(() => ['1', '2', '3', '4', '5'].every((n) => ep(E(n))) && ep(L(1)) && ep(L(2)) && ep(id(S3 + '1.mkv')) && ep(id(S3 + '2.mkv')) &&
+        ep(id('Series/Logo Show/Season 01/Logo Show - S01E01.mkv')) && ep(id('Series/Broken Show/Season 01/Broken Show - S01E02.mkv')));
       await wait(1000);
 
       // The guesses.

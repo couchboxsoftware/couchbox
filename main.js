@@ -13,6 +13,8 @@ const { Tidy } = require('./src/main/tidy');
 const { Copies } = require('./src/main/copies');
 const shellMenu = require('./src/main/shell-menu');
 const { Intros } = require('./src/main/intros');
+const pinsLib = require('./src/main/pins');
+const hello = require('./src/main/hello');
 
 if (process.env.COUCHBOX_DATA_DIR) app.setPath('userData', process.env.COUCHBOX_DATA_DIR);
 
@@ -38,6 +40,7 @@ let converter = null;
 let downloads = null;
 let intros = null;
 let avatarDir = null; // profile pictures: <data>\avatars\<profile>-<time>.jpg
+let pins = null; // profile PINs (src/main/pins.js)
 
 const send = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
@@ -312,6 +315,7 @@ app.whenReady().then(() => {
     lastProfile: null,
   });
   avatarDir = path.join(dataDir, 'avatars');
+  pins = pinsLib.create({ store, hello });
   bg = background.create({
     getWindow: () => win,
     store,
@@ -475,7 +479,7 @@ const publicSettings = () => {
 ipcMain.handle('init', () => ({
   settings: publicSettings(),
   avatarBase: require('url').pathToFileURL(avatarDir).href + '/',
-  profiles: store.data.profiles,
+  profiles: pins.publicProfiles(), // never the PIN hashes, just locked: true
   lastProfile: store.data.lastProfile,
   introData: intros.view(),
   introAskMs: Number(process.env.COUCHBOX_INTRO_ASK_MS) || 15000, // how long "Was that the intro?" stays
@@ -570,7 +574,12 @@ function cleanAvatars() {
   for (const f of files) if (!used.has(f)) fs.rmSync(path.join(avatarDir, f), { force: true });
 }
 
-ipcMain.handle('profiles:save', (_e, profiles) => {
+// Returns the profiles as the screens see them, or { error } when a locked profile is changed
+// without its PIN (or a profile added / Kids turned off without a grown-up's PIN): pins.js.
+ipcMain.handle('profiles:save', (_e, list) => {
+  const g = pins.guardSave(Array.isArray(list) ? list : []);
+  if (g.error) return { error: g.error };
+  const profiles = g.profiles;
   // A picture is only ever a plain file name inside the avatars folder.
   for (const p of profiles) if (p.avatar && !/^[\w-]+\.jpg$/.test(p.avatar)) delete p.avatar;
   store.data.profiles = profiles;
@@ -579,8 +588,15 @@ ipcMain.handle('profiles:save', (_e, profiles) => {
   for (const k of Object.keys(store.data.progress)) if (!ids.has(k)) delete store.data.progress[k];
   for (const k of Object.keys(store.data.lists)) if (!ids.has(k)) delete store.data.lists[k];
   store.save();
-  return store.data.profiles;
+  return pins.publicProfiles();
 });
+
+/* ---------- profile PINs (pins.js, hello.js) ---------- */
+ipcMain.handle('pin:check', (_e, id, pin) => pins.check(id, pin));
+ipcMain.handle('pin:check-any', (_e, pin) => pins.checkAny(pin));
+ipcMain.handle('pin:set', (_e, id, newPin, currentPin) => pins.set(id, newPin, currentPin));
+ipcMain.handle('pin:forgot', (_e, id, name) => pins.forgot(id, name));
+ipcMain.handle('pin:kind', () => pins.helloKind());
 
 ipcMain.handle('profiles:last', (_e, id) => {
   store.data.lastProfile = id;

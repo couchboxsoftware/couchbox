@@ -262,7 +262,7 @@ function renderProfiles(app) {
       ${S.profiles
         .map(
           (p) => `<button class="pf" data-act="${S.managing ? 'edit-profile' : 'pick-profile'}" data-pid="${p.id}">
-            <div class="pic" style="background:${p.color}">${avatarInner(p)}${p.kids ? '<span class="kids">KIDS</span>' : ''}${S.managing ? `<div class="edit">${ICON.pencil}</div>` : ''}</div>
+            <div class="pic" style="background:${p.color}">${avatarInner(p)}${p.kids ? '<span class="kids">KIDS</span>' : ''}${p.locked ? `<span class="lock" title="Has a PIN">${ICON.lock}</span>` : ''}${S.managing ? `<div class="edit">${ICON.pencil}</div>` : ''}</div>
             <span>${esc(p.name)}</span></button>`
         )
         .join('')}
@@ -279,7 +279,18 @@ function openProfileEditor(pid, first = false) {
   // The picture being edited: undefined = unchanged, null = removed, a data URL = newly cropped.
   // Nothing is saved until Save.
   let pending;
+  let pendingPin = null; // a new profile's PIN, added once it's saved
   const showsPicture = () => (pending === undefined ? !!p.avatar : !!pending);
+  const lockedNow = () => !!(existing && (S.profiles.find((x) => x.id === p.id) || {}).locked);
+  // Profile lock: grown-up profiles only (kids profiles can't have a PIN).
+  const lockHTML = () => {
+    if (first) return '';
+    const row = (sub, buttons) => `<div class="pe-lock"><span class="t-text"><b>Profile lock</b><small>${sub}</small></span>${buttons}</div>`;
+    if (p.kids) return lockedNow() ? `<p class="pe-note" style="color:var(--text-2);margin:8px 0 0">Kids profiles can't have a PIN, so this profile's PIN is removed when you save.</p>` : '';
+    if (lockedNow()) return row('A PIN is asked for to open this profile, change it or open Settings.', '<button class="btn btn-sm btn-ghost" id="pe-pin-change">Change PIN</button><button class="btn btn-sm btn-ghost" id="pe-pin-remove">Remove PIN</button>');
+    if (pendingPin) return row('The PIN is added when you save.', `<button class="btn btn-sm btn-ghost" id="pe-pin-undo">Don't add it</button>`);
+    return row('Ask for a 4-number PIN to open this profile.', '<button class="btn btn-sm btn-ghost" id="pe-pin-add">Add PIN</button>');
+  };
   const avInner = () =>
     typeof pending === 'string' ? `<img class="av-img" src="${pending}" alt="" />` : pending === null ? esc((p.name || '?').charAt(0).toUpperCase()) : avatarInner(p);
   const draw = (err) => {
@@ -301,6 +312,7 @@ function openProfileEditor(pid, first = false) {
           </div>
         </div>
         <label class="toggle"><span class="t-text"><b>Kids profile</b><small>Only shows titles rated U, PG or family-friendly on TMDB.</small></span><span class="switch"><input type="checkbox" id="pe-kids" ${p.kids ? 'checked' : ''} /><span></span></span></label>
+        ${lockHTML()}
         <div class="row-btns">
           ${existing ? '<button class="btn btn-sm btn-ghost" id="pe-del" style="margin-right:auto">Delete profile</button>' : ''}
           ${first ? '' : '<button class="btn btn-sm btn-ghost" id="pe-cancel">Cancel</button>'}
@@ -340,18 +352,71 @@ function openProfileEditor(pid, first = false) {
         $('#pe-av').style.background = p.color;
       })
     );
-    $('#pe-kids').addEventListener('change', (e) => (p.kids = e.target.checked));
+    $('#pe-kids').addEventListener('change', (e) => {
+      p.kids = e.target.checked;
+      p.name = name.value;
+      draw(); // shows or hides Profile lock
+    });
+    // Profile lock buttons. Changing or removing a PIN asks for the current one first.
+    const fresh = () => S.profiles.find((x) => x.id === p.id) || p;
+    const pinDone = (r, msg) => {
+      if (!r || !r.ok) return draw(r && r.error);
+      Pin.syncProfiles(r.profiles);
+      toast(msg, 2200);
+      draw();
+    };
+    if ($('#pe-pin-add'))
+      $('#pe-pin-add').onclick = async () => {
+        p.name = name.value;
+        const pin = await Pin.choose({ profile: { ...p, name: p.name || 'this profile' } });
+        if (!pin) return draw();
+        if (!existing) {
+          pendingPin = pin;
+          return draw();
+        }
+        pinDone(await cb.pinSet(p.id, pin, null), 'PIN added');
+      };
+    if ($('#pe-pin-undo'))
+      $('#pe-pin-undo').onclick = () => {
+        p.name = name.value;
+        pendingPin = null;
+        draw();
+      };
+    if ($('#pe-pin-change'))
+      $('#pe-pin-change').onclick = async () => {
+        p.name = name.value;
+        const cur = await Pin.ask({ profile: fresh(), title: 'Enter the current PIN', wantPin: true });
+        if (!cur) return draw(); // cancelled (or Forgot PIN? removed it)
+        const pin = await Pin.choose({ profile: fresh() });
+        if (!pin) return draw();
+        pinDone(await cb.pinSet(p.id, pin, cur), 'PIN changed');
+      };
+    if ($('#pe-pin-remove'))
+      $('#pe-pin-remove').onclick = async () => {
+        p.name = name.value;
+        const cur = await Pin.ask({ profile: fresh(), title: 'Enter the current PIN', note: 'to remove it', wantPin: true });
+        if (!cur) return draw();
+        pinDone(await cb.pinSet(p.id, null, cur), 'PIN removed');
+      };
     if ($('#pe-cancel')) $('#pe-cancel').onclick = closeModal;
     $('#pe-save').onclick = async () => {
       p.name = name.value.trim();
       if (!p.name) return draw('Enter a name');
+      // Turning Kids off, once any profile has a PIN, needs a grown-up's PIN.
+      if (existing && existing.kids && !p.kids && S.profiles.some((x) => x.locked) && !(await Pin.ask({ note: 'to turn Kids off' }))) return;
       if (typeof pending === 'string') {
         const file = await cb.saveAvatar(p.id, pending);
         if (!file) return draw("Couldn't save the picture. Try another one.");
         p.avatar = file;
       } else if (pending === null) delete p.avatar;
       const list = existing ? S.profiles.map((x) => (x.id === p.id ? p : x)) : [...S.profiles, p];
-      S.profiles = await cb.saveProfiles(list);
+      const saved = await cb.saveProfiles(list);
+      if (!Array.isArray(saved)) return draw(saved.error); // a PIN was needed (pins.js)
+      S.profiles = saved;
+      if (pendingPin) {
+        const r = await cb.pinSet(p.id, pendingPin, null);
+        if (r.ok) S.profiles = r.profiles;
+      }
       if (S.profile && S.profile.id === p.id) S.profile = S.profiles.find((x) => x.id === p.id) || p;
       closeModal();
       if (first) return pickProfile(p.id);
@@ -360,7 +425,9 @@ function openProfileEditor(pid, first = false) {
     if ($('#pe-del'))
       $('#pe-del').onclick = async () => {
         if (!confirm(`Delete ${existing.name}? Their progress and list will be removed.`)) return;
-        S.profiles = await cb.saveProfiles(S.profiles.filter((x) => x.id !== p.id));
+        const saved = await cb.saveProfiles(S.profiles.filter((x) => x.id !== p.id));
+        if (!Array.isArray(saved)) return draw(saved.error);
+        S.profiles = saved;
         if (S.profile && S.profile.id === p.id) S.profile = null;
         closeModal();
         render();
@@ -370,8 +437,11 @@ function openProfileEditor(pid, first = false) {
 }
 
 async function pickProfile(pid) {
-  const p = S.profiles.find((x) => x.id === pid);
+  let p = S.profiles.find((x) => x.id === pid);
   if (!p) return;
+  // A locked profile asks for its PIN (full screen) every time it's picked.
+  if (p.locked && !(S.profile && S.profile.id === p.id) && !(await Pin.ask({ profile: p, full: true }))) return;
+  p = S.profiles.find((x) => x.id === pid) || p; // Forgot PIN? may have changed it
   S.profile = p;
   S.managing = false;
   S.tab = 'home';
@@ -846,7 +916,14 @@ function settingsTabs() {
   const kids = !!(S.profile && S.profile.kids);
   return SETTINGS_TABS.filter(([k]) => !kids || k === 'playback' || k === 'app');
 }
-function openSettings(err, tab) {
+// A locked profile's PIN is asked every time Settings opens (not when switching its tabs).
+async function openSettings(err, tab) {
+  if (S.profile && S.profile.locked && !$('#modal-root .settings-dlg')) {
+    if (!(await Pin.ask({ profile: S.profile, note: 'to open Settings' }))) return;
+  }
+  showSettings(err, tab);
+}
+function showSettings(err, tab) {
   hideHover();
   S.details = null;
   const st = S.settings;
@@ -1131,11 +1208,16 @@ document.addEventListener('click', async (e) => {
       pickProfile(el.dataset.pid);
       break;
     case 'add-profile':
+      // Once any profile has a PIN, adding one needs a grown-up's PIN (so kids can't get round it).
+      if (S.profiles.some((p) => p.locked) && !(await Pin.ask({ full: true, note: 'to add a profile' }))) break;
       openProfileEditor(null);
       break;
-    case 'edit-profile':
+    case 'edit-profile': {
+      const p = S.profiles.find((x) => x.id === el.dataset.pid);
+      if (p && p.locked && !(await Pin.ask({ profile: p, full: true, note: 'to change this profile' }))) break;
       openProfileEditor(el.dataset.pid);
       break;
+    }
     case 'toggle-manage':
       S.managing = !S.managing;
       render();

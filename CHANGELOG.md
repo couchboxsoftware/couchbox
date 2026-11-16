@@ -20,6 +20,16 @@
   "(Settings, App)"; no tests, code or file names.
 -->
 
+## 0.3.11 · 16 Nov 2026
+Grown-up profiles can be locked with a PIN.
+
+### New
+- Profile lock gives a grown-up profile a 4-number PIN, asked when it's picked, when it's changed and when Settings is opened on it (Manage profiles, edit the profile).
+- Locked profiles show a padlock on Who's watching. Kids profiles can't have a PIN.
+- Once a profile has a PIN, adding a profile or turning a profile's Kids setting off needs a grown-up's PIN.
+- Forgot PIN? removes it after Windows Hello confirms it's you, or your Windows password on a PC without Windows Hello.
+- After 5 wrong tries in a row, there's a 30-second wait.
+
 ## 0.3.10 · 16 Nov 2026
 Couchbox recognises far more of your films by themselves.
 
