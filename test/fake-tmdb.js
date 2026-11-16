@@ -14,7 +14,11 @@ const films = {
   'paper moons': { year: 2021, poster: 'poster2', backdrop: 'backdrop2', cert: '12A', genres: ['Drama', 'Romance'], overview: 'A set designer and a stage magician fall out of love one show at a time.' },
   // Only used by test/finder-check.js (a film that isn't in the sample library yet).
   'harbour lights': { year: 2020, poster: 'poster3', backdrop: 'backdrop1', cert: '12A', genres: ['Drama'], overview: 'A lighthouse keeper\'s daughter comes home to a town that has moved on without her.' },
+  // Only used by test/rematch-check.js: the wrong answer TMDB gives for "melody time" (a short).
+  "let's sing an old time song": { year: 1947, runtime: 9, poster: 'poster2', backdrop: 'backdrop1', cert: 'U', genres: ['Animation'], overview: 'A sing-along short.' },
 };
+// Searches that come back with a different title (like TMDB's loose matches).
+const aliases = { 'melody time': "let's sing an old time song" };
 const shows = {
   'the long coast': { year: 2022, poster: 'poster2', backdrop: 'backdrop1', cert: '15', genres: ['Drama', 'Mystery'], overview: 'A fishing town keeps a secret for forty years, until a storm washes it ashore.' },
 };
@@ -31,8 +35,9 @@ globalThis.fetch = async (input) => {
   const q = (u.searchParams.get('query') || '').toLowerCase();
   if (p === '/configuration') return json({ images: {} });
   if (p === '/search/movie') {
-    const f = films[q];
-    return json({ results: f ? [{ id: idOf(q), title: q.replace(/\b\w/g, (c) => c.toUpperCase()), release_date: f.year + '-05-01', popularity: 20, overview: f.overview, poster_path: '/' + f.poster + '.jpg' }] : [] });
+    const name = films[q] ? q : aliases[q];
+    const f = films[name];
+    return json({ results: f ? [{ id: idOf(name), title: name.replace(/\b\w/g, (c) => c.toUpperCase()), release_date: f.year + '-05-01', popularity: 20, overview: f.overview, poster_path: '/' + f.poster + '.jpg' }] : [] });
   }
   if (p === '/search/tv') {
     const s = shows[q];
@@ -44,7 +49,7 @@ globalThis.fetch = async (input) => {
     const f = films[name];
     return json({
       id: Number(m[1]), title: name.replace(/\b\w/g, (c) => c.toUpperCase()), release_date: f.year + '-05-01', overview: f.overview, tagline: '',
-      genres: f.genres.map((g, i) => ({ id: i, name: g })), vote_average: 7.4, runtime: 104, poster_path: '/' + f.poster + '.jpg', backdrop_path: '/' + f.backdrop + '.jpg',
+      genres: f.genres.map((g, i) => ({ id: i, name: g })), vote_average: 7.4, runtime: f.runtime || null, poster_path: '/' + f.poster + '.jpg', backdrop_path: '/' + f.backdrop + '.jpg',
       release_dates: { results: [{ iso_3166_1: 'GB', release_dates: [{ certification: f.cert }] }] },
     });
   }
@@ -55,6 +60,9 @@ globalThis.fetch = async (input) => {
       id: Number(m[1]), name: name.replace(/\b\w/g, (c) => c.toUpperCase()), first_air_date: s.year + '-01-10', overview: s.overview,
       genres: s.genres.map((g, i) => ({ id: i, name: g })), vote_average: 8.1, poster_path: '/' + s.poster + '.jpg', backdrop_path: '/' + s.backdrop + '.jpg',
       seasons: [{ season_number: 1, name: 'Season 1' }, { season_number: 2, name: 'Season 2' }],
+      episode_run_time: [], // like many shows on TMDB: no usual length given...
+      last_episode_to_air: { runtime: 96 }, // ...and a double-length finale
+
       content_ratings: { results: [{ iso_3166_1: 'GB', rating: s.cert }] },
     });
   }

@@ -32,7 +32,7 @@ const Unmatched = (() => {
     if (!list.length)
       return `<div class="empty" style="padding-top:200px"><h2>Everything is matched</h2><p>Every film and series has its poster and details.</p><button class="btn btn-sm btn-ghost" data-act="tab" data-tab="home">Back to Home</button></div>`;
     return `<div class="rows flat"><h1 class="page-title">Unmatched</h1>
-      <p class="um-intro">TMDB couldn't recognise these from their names. Pick one to search for it yourself. Once it's matched, its file is tidied into Films or Series.</p>
+      <p class="um-intro">Couchbox couldn't be sure what these are from their names and lengths. Pick one to choose from its best guesses or search for it yourself. Once it's matched, its file is tidied into Films or Series.</p>
       <div class="um-grid">${list.map(cardHTML).join('')}</div></div>`;
   }
 
@@ -84,15 +84,23 @@ const Unmatched = (() => {
     }));
 
     let results = [];
+    // Likely matches Couchbox found but wasn't sure enough of: listed first, above the search.
+    const guesses = item.guesses || [];
+    const row = (r, i) => `<button class="match" data-i="${i}">${r.poster ? `<img src="${r.poster}" alt="" />` : '<div class="noimg"></div>'}<div><b>${esc(r.title)} ${r.year ? `(${esc(r.year)})` : ''}<span class="fm-tag">${r.kind === 'tv' ? 'Series' : 'Film'}</span></b><small>${esc(r.overview)}</small></div></button>`;
     const go = async () => {
       const out = $('#fm-results');
       out.innerHTML = '<div class="spinner" style="margin:20px auto"></div>';
       $('#fm-ep').hidden = true;
       try {
-        results = await cb.searchMatches(id, $('#fm-q').value.trim(), { kind, year: $('#fm-year').value.trim() });
-        out.innerHTML = results.length
-          ? results.map((r, i) => `<button class="match" data-i="${i}">${r.poster ? `<img src="${r.poster}" alt="" />` : '<div class="noimg"></div>'}<div><b>${esc(r.title)} ${r.year ? `(${esc(r.year)})` : ''}<span class="fm-tag">${r.kind === 'tv' ? 'Series' : 'Film'}</span></b><small>${esc(r.overview)}</small></div></button>`).join('')
-          : '<p style="margin:12px 0 0">No results. Try a shorter title, another year, or Both.</p>';
+        const found = await cb.searchMatches(id, $('#fm-q').value.trim(), { kind, year: $('#fm-year').value.trim() });
+        const rest = found.filter((r) => !guesses.some((g) => g.id === r.id && g.kind === r.kind));
+        results = [...guesses, ...rest];
+        const head = (t) => `<h4 class="fm-group">${t}</h4>`;
+        out.innerHTML =
+          (guesses.length ? head('Best guesses') + guesses.map(row).join('') : '') +
+          (rest.length
+            ? (guesses.length ? head('Search results') : '') + rest.map((r, j) => row(r, j + guesses.length)).join('')
+            : guesses.length ? '' : '<p style="margin:12px 0 0">No results. Try a shorter title, another year, or Both.</p>');
         $$('.match', out).forEach((b) => b.addEventListener('click', () => pick(results[Number(b.dataset.i)])));
       } catch (e) {
         out.innerHTML = `<div class="err">${esc(e.message)}</div>`;

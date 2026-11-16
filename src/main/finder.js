@@ -14,7 +14,7 @@ const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
 const media = require('./media');
-const { Tmdb } = require('./tmdb');
+const { findMatch } = require('./matcher'); // the same matching as the library uses
 const { parseTitleYear, episodeInfo } = require('./scanner');
 
 const SAME_LENGTH_S = 30;
@@ -62,18 +62,6 @@ async function fingerprint(file, size) {
     await fh.close();
   }
   return h.digest('hex');
-}
-
-// Is the TMDB result a confident match for the title we parsed from the file name?
-function confident(result, title, year, dateField) {
-  if (!result) return false;
-  const t = norm(title);
-  if (t.length < 2) return false;
-  const names = [result.title, result.name, result.original_title, result.original_name].map(norm).filter(Boolean);
-  const y = parseInt((result[dateField] || '').slice(0, 4), 10);
-  if (names.includes(t)) return !year || !y || Math.abs(y - year) <= 1;
-  // Close but not exact (e.g. "Alien Directors Cut" vs "Alien"): only with a matching year.
-  return !!year && y === year && names.some((n) => n.length > 3 && (t.startsWith(n) || n.startsWith(t)));
 }
 
 class Finder {
@@ -283,24 +271,24 @@ class Finder {
         showRaw = /^(season|series|s)[ ._-]*\d+$|^specials?$/i.test(parent) ? path.basename(path.dirname(path.dirname(r.file))) : parent;
       }
       const show = parseTitleYear(showRaw);
-      const results = await tmdb.searchSeries(show.title, show.year);
-      const best = Tmdb.pick(results, show.title, show.year, 'first_air_date');
-      if (confident(best, show.title, show.year, 'first_air_date')) {
+      const m = await findMatch(tmdb, { kind: 'series', raw: showRaw, title: show.title, year: show.year, minutes: r.duration / 60 });
+      if (m.confident) {
+        const best = m.best;
         r.state = 'match';
         r.kind = 'episode';
         r.identity = `tv:${best.id}:${ep.season}:${ep.episode}`;
-        r.title = best.name;
+        r.title = best.title;
         r.season = ep.season;
         r.episode = ep.episode;
-        r.label = `${best.name} · S${ep.season} E${ep.episode}`;
+        r.label = `${best.title} · S${ep.season} E${ep.episode}`;
         return;
       }
     } else {
       const parsed = parseTitleYear(base);
-      const results = await tmdb.searchFilm(parsed.title, parsed.year);
-      const best = Tmdb.pick(results, parsed.title, parsed.year, 'release_date');
-      if (confident(best, parsed.title, parsed.year, 'release_date')) {
-        const y = parseInt((best.release_date || '').slice(0, 4), 10) || null;
+      const m = await findMatch(tmdb, { kind: 'film', raw: base, title: parsed.title, year: parsed.year, minutes: r.duration / 60 });
+      if (m.confident) {
+        const best = m.best;
+        const y = parseInt(best.year, 10) || null;
         r.state = 'match';
         r.kind = 'film';
         r.identity = `movie:${best.id}`;

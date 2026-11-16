@@ -6,6 +6,7 @@ const { pathToFileURL } = require('url');
 const { scanLibrary } = require('./scanner');
 const media = require('./media');
 const { Tmdb } = require('./tmdb');
+const { findMatch, MATCHER_VERSION } = require('./matcher');
 const { JsonStore } = require('./store');
 
 const url = (p) => (p ? pathToFileURL(p).href : null);
@@ -199,17 +200,33 @@ class Library {
   }
 
   async matchAll() {
-    const titles = this.meta.data.titles;
-    const items = [...this.scan.films, ...this.scan.series].filter((it) => !titles[it.id] || titles[it.id].tmdbId == null && !titles[it.id].noMatch);
+    const md = this.meta.data;
+    const titles = md.titles;
+    // After a matcher update, every automatic match is checked again once (MATCHER_VERSION);
+    // titles matched with Fix match are never touched.
+    const recheck = md.matcher !== MATCHER_VERSION;
+    const items = [...this.scan.films, ...this.scan.series].filter((it) => {
+      const t = titles[it.id];
+      if (!t || (t.tmdbId == null && !t.noMatch)) return true;
+      return recheck && md.overrides[it.id] == null;
+    });
     let done = 0;
+    let failed = 0;
     const total = items.length;
     if (total) this.setStatus({ phase: 'matching', done, total });
     try {
       await pool(items, 4, async (it) => {
-        await this.matchItem(it);
-        this.setStatus({ phase: 'matching', done: ++done, total });
-        this.emit();
+        try {
+          await this.matchItem(it, null, { recheck });
+        } catch (e) {
+          failed++;
+          throw e;
+        } finally {
+          this.setStatus({ phase: 'matching', done: ++done, total });
+          this.emit();
+        }
       });
+      if (recheck && !failed) md.matcher = MATCHER_VERSION;
       // Episode names and stills for every season that exists on disk.
       const seasonJobs = [];
       for (const s of this.scan.series) {
@@ -232,20 +249,35 @@ class Library {
     }
   }
 
-  async matchItem(it, forcedId) {
-    const override = forcedId || this.meta.data.overrides[it.id];
+  // The video's length in minutes (a series: its usual episode length), or 0 if not known.
+  minutesOf(it) {
+    const files = this.meta.data.files;
+    const lens = (it.kind === 'series' ? it.episodes.map((e) => e.file) : [it.file]).map((f) => (files[f] && files[f].duration) || 0).filter((d) => d > 60);
+    if (!lens.length) return 0;
+    lens.sort((a, b) => a - b);
+    return lens[Math.floor(lens.length / 2)] / 60;
+  }
+
+  async matchItem(it, forcedId, opts = {}) {
+    const md = this.meta.data;
+    const override = forcedId || md.overrides[it.id];
     let id = override;
     if (!id) {
-      const results = it.kind === 'film' ? await this.tmdb.searchFilm(it.title, it.year) : await this.tmdb.searchSeries(it.title, it.year);
-      const best = Tmdb.pick(results, it.title, it.year, it.kind === 'film' ? 'release_date' : 'first_air_date');
-      if (!best) {
-        this.meta.data.titles[it.id] = { noMatch: true };
+      const r = await findMatch(this.tmdb, { kind: it.kind, raw: it.raw, title: it.title, year: it.year, minutes: this.minutesOf(it) });
+      const old = md.titles[it.id];
+      if (!r.confident) {
+        // Not sure: it goes to Unmatched, with the best guesses ready in Fix match.
+        md.titles[it.id] = { noMatch: true, guesses: r.guesses };
+        delete md.seasons[it.id];
         return;
       }
-      id = best.id;
+      // Checked again and still the same title: keep what's there (no new pictures).
+      if (opts.recheck && old && old.tmdbId === r.best.id) return;
+      id = r.best.id;
+      if (old && old.tmdbId !== id) delete md.seasons[it.id];
     }
     const details = it.kind === 'film' ? await this.tmdb.filmDetails(id) : await this.tmdb.seriesDetails(id);
-    this.meta.data.titles[it.id] = details || { noMatch: true };
+    md.titles[it.id] = details || { noMatch: true };
   }
 
   // Fix match search. opts: { kind: 'film' | 'tv' | 'both', year }. A series can only be matched
@@ -397,6 +429,7 @@ class Library {
         kidsSafe: !!t.kidsSafe,
         matched: !!t.tmdbId,
         noMatch: !!t.noMatch, // TMDB answered "no match" (the Unmatched tab)
+        guesses: t.noMatch ? t.guesses || [] : [], // likely matches it wasn't sure of (Fix match)
         fileName: path.basename(f.file),
         folder: path.relative(this.root, path.dirname(f.file)) || '.',
         imported: !!f.imported,
@@ -442,6 +475,7 @@ class Library {
         kidsSafe: !!t.kidsSafe,
         matched: !!t.tmdbId,
         noMatch: !!t.noMatch,
+        guesses: t.noMatch ? t.guesses || [] : [],
         // The show's folder (the common folder of its episodes), for the Unmatched tab.
         folder: path.relative(this.root, commonDir(s.episodes.map((e) => path.dirname(e.file)))) || '.',
         poster: url(t.poster),

@@ -20,6 +20,17 @@
   "(Settings, App)"; no tests, code or file names.
 -->
 
+## 0.3.10 · 16 Nov 2026
+Couchbox recognises far more of your films by themselves.
+
+### Improved
+- Names that start with the year, like "1942 - Bambi", are understood.
+- Each video's length is compared with TMDB's, so remakes with the same name are told apart and a wrong year in a file name is put right.
+- Names that don't quite match TMDB's, like "Seven Dwarves" or extra words after a dash, are found by searching again with less of the name.
+- When Couchbox isn't sure, the title stays in Unmatched instead of getting the wrong poster, and Fix match lists its best guesses first.
+- After this update, every title Couchbox matched by itself is checked once more; titles you picked in Fix match stay as they are.
+- Find videos recognises videos the same way.
+
 ## 0.3.9 · 15 Nov 2026
 Windows no longer close when you drag out of them.
 

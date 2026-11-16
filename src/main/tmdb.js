@@ -53,33 +53,44 @@ class Tmdb {
     return true;
   }
 
-  static pick(results, title, year, dateField) {
-    if (!results || !results.length) return null;
-    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-    const t = norm(title);
-    const yearOf = (r) => parseInt((r[dateField] || '').slice(0, 4), 10);
-    const nameOf = (r) => r.title || r.name || '';
-    const origOf = (r) => r.original_title || r.original_name || '';
-    const score = (r, i) => {
-      let s = -i * 0.5 + Math.min(r.popularity || 0, 50) / 25;
-      if (norm(nameOf(r)) === t || norm(origOf(r)) === t) s += 6;
-      if (year && yearOf(r) === year) s += 5;
-      else if (year && Math.abs(yearOf(r) - year) === 1) s += 2;
-      return s;
-    };
-    return results.map((r, i) => ({ r, s: score(r, i) })).sort((a, b) => b.s - a.s)[0].r;
-  }
-
-  async searchFilm(title, year) {
+  // With a year and no results, searches again without it (unless opts.exact).
+  async searchFilm(title, year, opts = {}) {
     let data = await this.get('/search/movie', { query: title, year: year || undefined });
-    if ((!data || !data.results.length) && year) data = await this.get('/search/movie', { query: title });
+    if ((!data || !data.results.length) && year && !opts.exact) data = await this.get('/search/movie', { query: title });
     return data ? data.results : [];
   }
 
-  async searchSeries(title, year) {
+  async searchSeries(title, year, opts = {}) {
     let data = await this.get('/search/tv', { query: title, first_air_date_year: year || undefined });
-    if ((!data || !data.results.length) && year) data = await this.get('/search/tv', { query: title });
+    if ((!data || !data.results.length) && year && !opts.exact) data = await this.get('/search/tv', { query: title });
     return data ? data.results : [];
+  }
+
+  // A film's length, or a series' usual episode length, in minutes (null if TMDB doesn't say).
+  // Remembered while Couchbox runs, so matching asks once per title.
+  runtimeOf(kind, id) {
+    this.runtimes = this.runtimes || new Map();
+    const key = kind + ':' + id;
+    if (!this.runtimes.has(key)) {
+      this.runtimes.set(key, (async () => {
+        const d = await this.get((kind === 'tv' ? '/tv/' : '/movie/') + id);
+        if (!d) return null;
+        if (kind !== 'tv') return d.runtime || null;
+        // A series: its usual episode length, or else the middle one of season 1's episodes
+        // (never the last episode: a finale is often double length).
+        const middle = (xs) => {
+          const v = xs.filter((x) => x > 0).sort((a, b) => a - b);
+          return v.length ? v[Math.floor(v.length / 2)] : null;
+        };
+        const usual = middle(d.episode_run_time || []);
+        if (usual) return usual;
+        const first = (d.seasons || []).some((s) => s.season_number === 1) ? 1 : ((d.seasons || [])[0] || {}).season_number;
+        if (first == null) return null;
+        const s = await this.get(`/tv/${id}/season/${first}`);
+        return middle(((s && s.episodes) || []).map((e) => e.runtime || 0));
+      })().catch(() => null));
+    }
+    return this.runtimes.get(key);
   }
 
   async filmDetails(id) {

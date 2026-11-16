@@ -207,6 +207,7 @@ function scanLibrary(root) {
           kind: 'series',
           title: show.title,
           year: show.year,
+          raw: showName,
           episodes: [],
           added: 0,
           legacyIds: [], // ids older versions gave parts of this show (e.g. "...s01"), to carry settings over
@@ -232,12 +233,14 @@ function scanLibrary(root) {
     } else {
       const parent = dirs.length ? dirs[dirs.length - 1] : null;
       const useFolder = parent && !FILM_ROOTS.test(parent) && !IMPORTED_ROOT.test(parent) && videosPerDir.get(path.dirname(file)) === 1;
-      const parsed = parseTitleYear(useFolder ? parent : path.basename(fileName, path.extname(fileName)));
+      const raw = useFolder ? parent : path.basename(fileName, path.extname(fileName));
+      const parsed = parseTitleYear(raw);
       films.push({
         id: 'film:' + rel.toLowerCase(),
         kind: 'film',
         title: parsed.title,
         year: parsed.year,
+        raw, // the name it was read from (matcher.js reads it again its own way)
         file,
         partial: !!fin,
         size: stat.size,

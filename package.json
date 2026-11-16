@@ -1,7 +1,7 @@
 {
   "name": "couchbox",
   "productName": "Couchbox",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Your home video library, streaming-style.",
   "main": "main.js",
   "author": "Couchbox Software",

@@ -558,6 +558,8 @@ body.is-full .exit-full { display: inline-flex; }
 .fm-kind input:checked + span { background: #333; color: #fff; font-weight: 600; }
 .fm-kind input:focus-visible + span { outline: 2px solid var(--accent); }
 .fm-only { padding: 7px 12px; font-size: 13.5px; color: var(--text-2); }
+.fm-group { margin: 6px 0 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-2); }
+.fm-group:first-child { margin-top: 0; }
 .fm-tag { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 3px; border: 1px solid var(--line); color: var(--text-2); vertical-align: 1px; }
 .fm-ep { margin-top: 14px; padding: 12px; border-radius: var(--radius); background: #202020; }
 .fm-ep p { margin: 0 0 10px; }
