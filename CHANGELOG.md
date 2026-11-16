@@ -20,6 +20,20 @@
   "(Settings, App)"; no tests, code or file names.
 -->
 
+## 0.3.12 · 16 Nov 2026
+Make your own collections of films, series, seasons and episodes.
+
+### New
+- Collections are yours to make: films, whole series, single seasons and single episodes in any mix (Collections tab, New collection).
+- Add to collection is on every title's page, on the card that pops up when you point at a poster, and on each episode, and a collection's Edit has a search to add titles.
+- A collection's page shows everything in it in your own order, release order or A to Z, and Edit lets you rename it, drag things around, remove them or delete it.
+- Share a collection with everyone, or with everyone except kids profiles; only the profile that made it can change it.
+- Your collections have a row on Home, and they show in Films or Series when at least half of one is films or series.
+- Remove from Continue watching takes a title out of that row, from the ✕ on its card or its page, with Undo; your place is kept, and it comes back when you watch it again.
+
+### Improved
+- A small knock of the mouse no longer brings up the player's controls; they come up when you move the mouse further, give it a shake or click.
+
 ## 0.3.11 · 16 Nov 2026
 Grown-up profiles can be locked with a PIN.
 

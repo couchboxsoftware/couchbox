@@ -15,6 +15,7 @@ const shellMenu = require('./src/main/shell-menu');
 const { Intros } = require('./src/main/intros');
 const pinsLib = require('./src/main/pins');
 const hello = require('./src/main/hello');
+const collectionsLib = require('./src/main/collections');
 
 if (process.env.COUCHBOX_DATA_DIR) app.setPath('userData', process.env.COUCHBOX_DATA_DIR);
 
@@ -41,6 +42,23 @@ let downloads = null;
 let intros = null;
 let avatarDir = null; // profile pictures: <data>\avatars\<profile>-<time>.jpg
 let pins = null; // profile PINs (src/main/pins.js)
+let collections = null; // your own collections (src/main/collections.js)
+
+// Titles taken out of Continue watching, per profile: { [pid]: { [itemId]: u } }, where u is the
+// progress time when it was removed. Playing it again saves a newer time, so it comes back.
+// Ids that changed (old -> new) carry over.
+function migrateHidden(map) {
+  let changed = false;
+  for (const hidden of Object.values(store.data.cwHidden || {})) {
+    for (const [old, now] of Object.entries(map)) {
+      if (!(old in hidden)) continue;
+      if (!(now in hidden)) hidden[now] = hidden[old];
+      delete hidden[old];
+      changed = true;
+    }
+  }
+  return changed;
+}
 
 const send = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
@@ -94,9 +112,12 @@ function migrateShowIds(map) {
   }
   // Each season's intro (found automatically) follows the show to its new id.
   if (intros && intros.migrateShows(map)) changed = true;
+  // So do collections and "Remove from Continue watching".
+  if (collections && collections.migrate(map)) changed = true;
+  if (migrateHidden(map)) changed = true;
   if (!changed) return;
   store.save();
-  send('prefs-changed', { kidsAllow: d.kidsAllow });
+  send('prefs-changed', { kidsAllow: d.kidsAllow, collections: true });
 }
 
 // A converted file got a new name (for example .avi -> .mp4), so its id changed: move every
@@ -113,8 +134,10 @@ function migrateFileId(oldId, newId) {
     delete d.kidsAllow[oldId];
   }
   if (intros) intros.migrate(oldId, newId); // its intro too
+  if (collections) collections.migrate({ [oldId]: newId }); // its place in collections
+  migrateHidden({ [oldId]: newId });
   store.save();
-  send('prefs-changed', { kidsAllow: d.kidsAllow, progress: true });
+  send('prefs-changed', { kidsAllow: d.kidsAllow, progress: true, collections: true });
 }
 
 /* ---------- warnings ---------- */
@@ -313,9 +336,14 @@ app.whenReady().then(() => {
     lists: {},
     kidsAllow: {},
     lastProfile: null,
+    collections: [],
+    cwHidden: {},
   });
+  if (!store.data.collections) store.data.collections = [];
+  if (!store.data.cwHidden) store.data.cwHidden = {};
   avatarDir = path.join(dataDir, 'avatars');
   pins = pinsLib.create({ store, hello });
+  collections = collectionsLib.create({ store });
   bg = background.create({
     getWindow: () => win,
     store,
@@ -587,8 +615,35 @@ ipcMain.handle('profiles:save', (_e, list) => {
   const ids = new Set(profiles.map((p) => p.id));
   for (const k of Object.keys(store.data.progress)) if (!ids.has(k)) delete store.data.progress[k];
   for (const k of Object.keys(store.data.lists)) if (!ids.has(k)) delete store.data.lists[k];
+  for (const k of Object.keys(store.data.cwHidden)) if (!ids.has(k)) delete store.data.cwHidden[k];
+  collections.removeProfiles(ids); // a deleted profile's collections go with it
   store.save();
   return pins.publicProfiles();
+});
+
+/* ---------- your own collections (collections.js) ---------- */
+// Each returns { collections } (as this profile sees them) or { error }.
+ipcMain.handle('collections:get', (_e, pid) => collections.view(pid));
+ipcMain.handle('collections:create', (_e, pid, name) => collections.create(pid, name));
+ipcMain.handle('collections:update', (_e, pid, id, changes) => collections.update(pid, id, changes));
+ipcMain.handle('collections:delete', (_e, pid, id) => collections.remove(pid, id));
+ipcMain.handle('collections:add', (_e, pid, id, item) => collections.addItem(pid, id, item));
+ipcMain.handle('collections:remove-item', (_e, pid, id, key) => collections.removeItem(pid, id, key));
+ipcMain.handle('collections:move', (_e, pid, id, key, to) => collections.moveItem(pid, id, key, to));
+
+/* ---------- Remove from Continue watching ---------- */
+ipcMain.handle('cw:get', (_e, pid) => store.data.cwHidden[pid] || {});
+ipcMain.handle('cw:hide', (_e, pid, itemId, u) => {
+  const h = (store.data.cwHidden[pid] = store.data.cwHidden[pid] || {});
+  h[itemId] = Number(u) || Date.now();
+  store.save();
+  return h;
+});
+ipcMain.handle('cw:unhide', (_e, pid, itemId) => {
+  const h = store.data.cwHidden[pid] || {};
+  delete h[itemId];
+  store.save();
+  return h;
 });
 
 /* ---------- profile PINs (pins.js, hello.js) ---------- */

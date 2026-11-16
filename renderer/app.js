@@ -18,6 +18,8 @@ const S = {
   warnings: [], // things that need attention: a yellow "!" on the menu, Settings, the tab and section
   dl: { files: {} }, // files still downloading or unfinished (see dl-ui.js and src/main/downloads.js)
   copies: null, // spare copies and different versions (see copies-ui.js and src/main/copies.js)
+  collections: [], // your own collections, as this profile sees them (collections-ui.js)
+  cwHidden: {}, // titles taken out of Continue watching: { id: progress time when removed }
 };
 
 /* ================= derived data ================= */
@@ -74,20 +76,42 @@ function playInfo(item) {
   return { file: nu.ep, series: item, startAt: 0, label: (nu.state === 'next' ? 'Play ' : 'Play ') + epCode(nu.ep), pct: 0, state: nu.state };
 }
 
+// Titles taken out of the row stay out until any part of them is played again (which saves a
+// newer progress time than the one recorded when it was removed).
 function continueWatching(kind) {
   const out = [];
+  const hidden = S.cwHidden || {};
+  const add = (e) => !(hidden[e.item.id] >= e.u) && out.push(e);
   for (const it of visible()) {
     if (kind && it.kind !== kind) continue;
     if (it.kind === 'film') {
       const p = S.progress[it.id];
-      if (p && p.t > 30 && !isWatched(p)) out.push({ item: it, u: p.u, pct: p.t / p.d });
+      if (p && p.t > 30 && !isWatched(p)) add({ item: it, u: p.u, pct: p.t / p.d });
     } else {
       const nu = nextUp(it);
-      if (nu.state === 'resume') out.push({ item: it, u: nu.u, pct: nu.p.t / nu.p.d, label: epCode(nu.ep) });
-      else if (nu.state === 'next') out.push({ item: it, u: nu.u, pct: 0, label: 'Next: ' + epCode(nu.ep) });
+      if (nu.state === 'resume') add({ item: it, u: nu.u, pct: nu.p.t / nu.p.d, label: epCode(nu.ep) });
+      else if (nu.state === 'next') add({ item: it, u: nu.u, pct: 0, label: 'Next: ' + epCode(nu.ep) });
     }
   }
   return out.sort((a, b) => b.u - a.u);
+}
+
+// "Remove from Continue watching" (hover card and title page), with Undo. Progress is kept.
+async function hideFromCw(id) {
+  const entry = continueWatching(null).find((x) => x.item.id === id);
+  if (!entry) return;
+  S.cwHidden = await cb.cwHide(S.profile.id, id, entry.u);
+  hideHover();
+  renderContent(true);
+  if (S.details) renderDetails();
+  toast('Removed from Continue watching', 6000, {
+    label: 'Undo',
+    onClick: async () => {
+      S.cwHidden = await cb.cwUnhide(S.profile.id, id);
+      renderContent(true);
+      if (S.details) renderDetails();
+    },
+  });
 }
 
 function metaBits(item) {
@@ -142,6 +166,11 @@ async function boot() {
     if (S.profile) S.list = await cb.getList(S.profile.id);
     // A converted file got a new name: its progress moved to the new id.
     if (S.profile && p.progress) S.progress = await cb.getProgress(S.profile.id);
+    // Ids changed: collections and "Remove from Continue watching" followed them.
+    if (S.profile && p.collections) {
+      [S.collections, S.cwHidden] = await Promise.all([cb.collectionsGet(S.profile.id), cb.cwGet(S.profile.id)]);
+      if (Coll.isOpen()) Coll.renderPage();
+    }
     scheduleRender();
   });
   showStatus(S.model.status || { phase: 'idle' });
@@ -447,7 +476,7 @@ async function pickProfile(pid) {
   S.tab = 'home';
   S.query = '';
   S.featured = {};
-  [S.progress, S.list] = await Promise.all([cb.getProgress(p.id), cb.getList(p.id)]);
+  [S.progress, S.list, S.collections, S.cwHidden] = await Promise.all([cb.getProgress(p.id), cb.getList(p.id), cb.collectionsGet(p.id), cb.cwGet(p.id)]);
   cb.setLastProfile(p.id);
   render();
 }
@@ -459,6 +488,7 @@ function renderBrowse(app) {
     ['series', 'Series'],
     ['films', 'Films'],
     ['list', 'My list'],
+    ['collections', 'Collections'],
   ];
   app.innerHTML = `
   <header class="nav" id="nav">
@@ -557,6 +587,9 @@ function renderContent(keepScroll = false) {
   } else if (S.tab === 'unmatched') {
     stopHeroVideo();
     content.innerHTML = Unmatched.pageHTML();
+  } else if (S.tab === 'collections') {
+    stopHeroVideo();
+    content.innerHTML = Coll.pageHTML();
   } else if (!allItems().length) {
     stopHeroVideo();
     const scanning = S.model.status && S.model.status.phase !== 'idle';
@@ -585,7 +618,10 @@ function renderContent(keepScroll = false) {
       let rows = '';
       rows += rowHTML('cw', `Continue watching for ${S.profile.name}`, cw);
       if (!kind) rows += rowHTML('list', 'My list', myList);
+      // Your collections: all of them on Home; in Films / Series, those at least half that kind.
+      if (!kind) rows += Coll.rowHTML('coll', 'Your collections', Coll.forTab(null));
       rows += rowHTML('new', 'Recently added', [...pool].sort(newest).slice(0, 24));
+      if (kind) rows += Coll.rowHTML('coll', 'Collections', Coll.forTab(kind));
       if (!kind) {
         rows += rowHTML('series', 'Series', vis.filter((i) => i.kind === 'series').sort(az));
         rows += rowHTML('films', 'Films', vis.filter((i) => i.kind === 'film' && !i.imported).sort(az));
@@ -734,6 +770,8 @@ function showHover(card) {
       <div class="hc-actions">
         <button class="round solid" data-act="play" data-id="${esc(item.id)}" aria-label="Play">${ICON.play}</button>
         <button class="round" data-act="list" data-id="${esc(item.id)}" aria-label="${inList ? 'Remove from My list' : 'Add to My list'}" title="${inList ? 'Remove from My list' : 'Add to My list'}">${inList ? ICON.check : ICON.plus}</button>
+        <button class="round" data-act="coll-add" data-id="${esc(item.id)}" aria-label="Add to collection" title="Add to collection">${ICON.collection}</button>
+        ${card.closest('[data-row="cw"]') ? `<button class="round" data-act="cw-hide" data-id="${esc(item.id)}" aria-label="Remove from Continue watching" title="Remove from Continue watching">${ICON.x}</button>` : ''}
         <span class="spacer"></span>
         <button class="round" data-act="open" data-id="${esc(item.id)}" aria-label="More info" title="More info">${ICON.down}</button>
       </div>
@@ -806,7 +844,8 @@ function episodeRowHTML(e, label, series) {
     <div class="ep-thumb">${e.still ? `<img src="${e.still}" loading="lazy" alt="" />` : ''}${DL.overlay(e.id) || Conv.overlay(e.id)}<div class="playov"><span>${ICON.play}</span></div>${pct > 0 ? `<div class="pbar"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}</div>
     <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}${Copies.lengthSuffix(e.id)}</span>${(S.copies && S.copies.versionOf[e.id]) ? Copies.cardBits(e.id) : ''}${DL.episodeTag(e) || (series ? Conv.episodeTag(e, series) : '')}<small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
     <p class="ep-ov">${esc(e.overview || (watched ? 'Watched' : p && p.t > 10 ? fmtDuration(p.d - p.t) + ' left' : ''))}</p></div>
-    <button class="ep-mark ${watched ? 'on' : ''}" data-act="mark" data-file="${esc(e.id)}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${ICON.check}</button>
+    <div class="ep-btns"><button class="ep-add" data-act="coll-add-ep" data-file="${esc(e.id)}" title="Add to collection" aria-label="Add to collection">${ICON.collection}</button>
+    <button class="ep-mark ${watched ? 'on' : ''}" data-act="mark" data-file="${esc(e.id)}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${ICON.check}</button></div>
   </div>`;
 }
 
@@ -855,6 +894,8 @@ function renderDetails() {
           ${info && info.pct > 0 ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="restart" data-id="${esc(item.id)}">Start over</button>` : ''}
           <button class="round" data-act="list" data-id="${esc(item.id)}" title="${inList ? 'Remove from My list' : 'Add to My list'}" aria-label="${inList ? 'Remove from My list' : 'Add to My list'}">${inList ? ICON.check : ICON.plus}</button>
           ${fileItem ? `<button class="round" data-act="mark" data-file="${esc(item.id)}" title="${isWatched(S.progress[item.id]) ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="Toggle watched" style="${isWatched(S.progress[item.id]) ? 'background:var(--good);border-color:var(--good)' : ''}">${ICON.check}</button>` : ''}
+          <button class="round" data-act="coll-add" data-id="${esc(item.id)}" title="Add to collection" aria-label="Add to collection">${ICON.collection}</button>
+          ${continueWatching(null).some((x) => x.item.id === item.id) ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="cw-hide" data-id="${esc(item.id)}">${ICON.x}Remove from Continue watching</button>` : ''}
         </div>
       </div>
     </div>
@@ -870,6 +911,7 @@ function renderDetails() {
         </div>
         <div class="d-side">
           ${item.genres.length ? `<div><span>Genres: </span>${item.genres.map(esc).join(', ')}</div>` : ''}
+          ${Coll.inLine(item)}
           ${item.kind === 'series' ? `<div><span>In your library: </span>${item.episodeCount} episode${item.episodeCount === 1 ? '' : 's'}</div>` : ''}
           ${fileItem && fileItem.subs.length ? `<div><span>Subtitles: </span>${fileItem.subs.map((s) => esc(s.label)).join(', ')}</div>` : ''}
         </div>
@@ -891,8 +933,12 @@ function renderDetails() {
 
 function closeModal() {
   const hadDetails = !!S.details;
+  const backTo = S.details && S.details.fromColl; // a title opened from a collection's page
+  const hadColl = Coll.isOpen();
   S.details = null;
   $('#modal-root').innerHTML = '';
+  if (hadColl) Coll.afterClose();
+  if (backTo) return Coll.openPage(backTo);
   if (hadDetails && S.pendingRender) scheduleRender();
 }
 
@@ -1149,6 +1195,11 @@ document.addEventListener('click', async (e) => {
     return Conv.act(act, el);
   }
   if (act.startsWith('wn-')) return WhatsNew.act(act);
+  if (act.startsWith('coll-')) {
+    e.stopPropagation();
+    return Coll.act(act, el);
+  }
+  if (act === 'cw-hide') return hideFromCw(id);
   if (act.startsWith('copy-') || act.startsWith('version-')) {
     e.stopPropagation();
     return Copies.act(act, el);

@@ -88,6 +88,8 @@ const ICON = {
   pencil: svg('<path d="M4 20h4L19 9l-4-4L4 16v4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill="none"/>'),
   episodes: svg('<rect x="3" y="4" width="18" height="5" rx="1.5" stroke="currentColor" stroke-width="2" fill="none"/><rect x="3" y="12" width="18" height="5" rx="1.5" stroke="currentColor" stroke-width="2" fill="none"/>'),
   star: svg('<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z" fill="currentColor"/>'),
+  collection: svg('<rect x="3" y="8" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M7 5h11a2 2 0 0 1 2 2v11" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M9.5 11.5v6M6.5 14.5h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'),
+  grip: svg('<circle cx="9" cy="6" r="1.6" fill="currentColor"/><circle cx="15" cy="6" r="1.6" fill="currentColor"/><circle cx="9" cy="12" r="1.6" fill="currentColor"/><circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="9" cy="18" r="1.6" fill="currentColor"/><circle cx="15" cy="18" r="1.6" fill="currentColor"/>'),
   lock: svg('<rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2" fill="none"/>'),
   logo: svg('<rect x="1.5" y="5" width="21" height="14" rx="3.5" fill="currentColor"/><path d="M10 9v6l5-3-5-3z" fill="#121212"/>'),
 };
@@ -96,10 +98,24 @@ function brandHTML() {
   return `<span class="brand-icon">${BRAND.icon}</span>${BRAND.wordmark}`;
 }
 
-function toast(msg, ms = 3500) {
+// A short message at the bottom. action: { label, onClick } adds a button (like Undo).
+function toast(msg, ms = 3500, action) {
   const t = $('#toast');
   t.textContent = msg;
+  t.classList.toggle('has-act', !!action);
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-act';
+    b.textContent = action.label;
+    b.onclick = (e) => {
+      e.stopPropagation();
+      clearTimeout(toast._t);
+      t.classList.remove('show', 'has-act');
+      action.onClick();
+    };
+    t.appendChild(b);
+  }
   t.classList.add('show');
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove('show'), ms);
+  toast._t = setTimeout(() => t.classList.remove('show', 'has-act'), ms);
 }

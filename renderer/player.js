@@ -82,7 +82,7 @@ const Player = (() => {
       saveVolume();
     });
 
-    root.addEventListener('mousemove', poke);
+    root.addEventListener('mousemove', onMouseMove); // small knocks are ignored (see onMouseMove)
     root.addEventListener('click', onClick);
     video.addEventListener('dblclick', () => {
       clearTimeout(clickTimer);
@@ -318,8 +318,53 @@ const Player = (() => {
     root.classList.remove('idle');
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      if (st && !video.paused && !root.querySelector('.p-pop') && !root.querySelector('.timeline.drag')) root.classList.add('idle');
+      if (st && !video.paused && !root.querySelector('.p-pop') && !root.querySelector('.timeline.drag')) {
+        root.classList.add('idle');
+        moves = []; // moves from before the controls hid don't count
+      }
     }, 3000);
+  }
+
+  // A knock on the table shouldn't bring the controls up. While they're hidden, they come up for
+  // a longer move (WAKE_DIST px within WAKE_MS) or a shake (SHAKE_TURNS changes of direction of
+  // at least SHAKE_MIN px within SHAKE_MS), or a click. Once they're showing, any move keeps
+  // them up, as before. Distances are in CSS pixels (from the pointer's position, which every
+  // mouse event has), so it feels the same at any display scale.
+  const WAKE_DIST = 150, WAKE_MS = 500, SHAKE_TURNS = 3, SHAKE_MIN = 20, SHAKE_MS = 1000;
+  let moves = [];
+  let lastPos = null;
+  function onMouseMove(e) {
+    const dx = lastPos ? e.clientX - lastPos.x : 0;
+    const dy = lastPos ? e.clientY - lastPos.y : 0;
+    lastPos = { x: e.clientX, y: e.clientY };
+    if (!root.classList.contains('idle')) return poke();
+    if (!dx && !dy) return; // Chromium sends moves without moving when the page changes under the mouse
+    const now = performance.now();
+    moves.push({ t: now, dx, dy });
+    moves = moves.filter((m) => now - m.t <= SHAKE_MS);
+    // A longer move: the distance travelled in the last half second.
+    let dist = 0;
+    for (const m of moves) if (now - m.t <= WAKE_MS) dist += Math.hypot(m.dx, m.dy);
+    if (dist >= WAKE_DIST || turns('dx') >= SHAKE_TURNS || turns('dy') >= SHAKE_TURNS) {
+      moves = [];
+      poke();
+    }
+  }
+  // Changes of direction along one axis between swings of SHAKE_MIN px or more (moves one way
+  // are added up into a swing; small wobbles in between don't count).
+  function turns(axis) {
+    const swings = [];
+    for (const m of moves) {
+      const v = m[axis];
+      if (!v) continue;
+      const last = swings[swings.length - 1];
+      if (last && last.dir === Math.sign(v)) last.px += Math.abs(v);
+      else swings.push({ dir: Math.sign(v), px: Math.abs(v) });
+    }
+    const big = swings.filter((s) => s.px >= SHAKE_MIN);
+    let n = 0;
+    for (let i = 1; i < big.length; i++) if (big[i].dir !== big[i - 1].dir) n++;
+    return n;
   }
 
   function flash(icon) {
