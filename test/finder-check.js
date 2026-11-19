@@ -10,6 +10,9 @@ const { app } = require('electron');
 const T = process.env.FINDER_TEST;
 const out = process.env.COUCHBOX_SNAP_OUT;
 const lib = path.join(T, 'library');
+// The library's own holiday clip, as it was before (made fresh each time, so its size varies).
+const clashFile = path.join(lib, 'Imported', 'holiday clip.mp4');
+const clashBefore = fs.statSync(clashFile);
 const pc = path.join(T, 'pc');
 fs.mkdirSync(out, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-finder-'));
@@ -115,7 +118,7 @@ app.on('browser-window-created', (_e, win) => {
       check('Night Train version copied with its length in the name', fs.readdirSync(path.join(lib, 'Films')).some((n) => /^Night Train \(2019\) - \d+m\.mp4$/.test(n)));
       check('episode copied into Series\\Show\\Season 01', exists('Series\\The Long Coast\\Season 01\\The Long Coast - S01E03.mp4'));
       check('subtitle travelled with the episode', exists('Series\\The Long Coast\\Season 01\\The Long Coast - S01E03.srt'));
-      check('name clash skipped, existing file untouched', fs.statSync(path.join(lib, 'Imported', 'holiday clip.mp4')).size === 1259181 && /name is already there/.test(sumText));
+      check('name clash skipped, existing file untouched', (() => { const a = fs.statSync(clashFile); return a.size === clashBefore.size && a.mtimeMs === clashBefore.mtimeMs; })() && /name is already there/.test(sumText));
       check('originals still in place after Copy', fs.existsSync(path.join(pc, 'Downloads', 'Harbour.Lights.2020.1080p.mkv')));
       check('no half-copied files left', !fs.readdirSync(lib, { recursive: true }).some((n) => String(n).endsWith('.part')));
       await js(`document.querySelector('#finder-pop [data-p="done"]').click()`);

@@ -8,7 +8,7 @@
 // each with Copy and Move commands that start Couchbox with "--add copy|move <path>". They're
 // rewritten every time the installed app starts (so the exe path stays right after updates),
 // removed when the switch in Settings, App is turned off, and by the uninstaller
-// (build/installer.nsh). Portable copies get no menu (the exe moves around).
+// (build/installer.nsh).
 //
 // Explorer starts Couchbox once per selected item. The one already running (or the first one)
 // gathers them for 1.5 seconds into one job, adds them like Find videos does (TMDB, already in
@@ -27,8 +27,9 @@ const GATHER_MS = Number(process.env.COUCHBOX_ADD_GATHER_MS) || 1500;
 const classesRoot = () => process.env.COUCHBOX_REG_ROOT || 'HKEY_CURRENT_USER\\Software\\Classes';
 const keys = () => [...EXTS.map((e) => `${classesRoot()}\\SystemFileAssociations\\${e}\\shell\\Couchbox`), `${classesRoot()}\\Directory\\shell\\Couchbox`];
 
-// Installed copies only (tests can switch it on).
-const available = () => !!process.env.COUCHBOX_SHELL_MENU_TEST || (app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR);
+// The installed Couchbox only, never the test version (run from source), so the test version can
+// never change the installed one's menu. Tests can switch it on, but only with a throwaway key.
+const available = () => (process.env.COUCHBOX_SHELL_MENU_TEST ? !!process.env.COUCHBOX_REG_ROOT : app.isPackaged);
 
 function regString(s) {
   return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
@@ -47,7 +48,7 @@ function regImport(text) {
 }
 
 // Writes the menu, pointing at this Couchbox. Returns a problem in words, or ''.
-function register(exe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath) {
+function register(exe = process.execPath) {
   const icon = `"${exe}",0`;
   const lines = ['Windows Registry Editor Version 5.00', ''];
   for (const key of keys()) {

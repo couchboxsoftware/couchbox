@@ -39,11 +39,11 @@ if (!FRESH) {
   // (The newest entry can be the version about to be released, one ahead of package.json.)
   check('it has every version from 0.3.0 to this one', entries.some((e) => e.version === current) && changelog.compare(entries[0].version, current) >= 0 && entries[entries.length - 1].version === '0.3.0', entries.map((e) => e.version).join(', '));
   const node = process.env.NODE_EXE || 'node';
-  const r = spawnSync(node, [path.join(__dirname, '..', 'tools', 'release-notes.js'), '0.3.7'], { encoding: 'utf8' });
+  const r = spawnSync(node, [path.join(__dirname, '..', 'tools', 'release.js'), '--notes', '0.3.7'], { encoding: 'utf8' });
   check('release notes for 0.3.7: headline then New, Improved, Fixed', r.status === 0 && /^Couchbox spots videos[\s\S]*### New[\s\S]*### Improved[\s\S]*### Fixed/.test(r.stdout), r.stderr);
-  const h = spawnSync(node, [path.join(__dirname, '..', 'tools', 'release-notes.js'), current, '--headline'], { encoding: 'utf8' });
+  const h = spawnSync(node, [path.join(__dirname, '..', 'tools', 'release.js'), '--notes', current, '--headline'], { encoding: 'utf8' });
   check('the banner gets just the headline', h.status === 0 && h.stdout.trim() === entries.find((e) => e.version === current).headline);
-  const miss = spawnSync(node, [path.join(__dirname, '..', 'tools', 'release-notes.js'), '9.9.9'], { encoding: 'utf8' });
+  const miss = spawnSync(node, [path.join(__dirname, '..', 'tools', 'release.js'), '--notes', '9.9.9'], { encoding: 'utf8' });
   check('a version with no entry is refused', miss.status === 1 && /no entry for 9\.9\.9/.test(miss.stderr));
   const bad = changelog.problems('## 1.0.0 · 15 Nov 2026\nNo full stop\n\n### Fixed\n- One.\n\n### New\n- Two.\n');
   check('the template check catches mistakes (headline, group order)', bad.length === 2, bad.join(' | '));

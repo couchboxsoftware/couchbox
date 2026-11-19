@@ -65,7 +65,20 @@ const Menus = (() => {
       ${what.kind === 'series' ? '<button class="tm-item" role="menuitem" data-m="more"><span>A season or some episodes…</span></button>' : ''}
       <button class="tm-item tm-accent" role="menuitem" data-m="new">${ICON.plus}<span>New collection</span></button>`;
   }
-  function openPlus(anchor, what) {
+  async function openPlus(anchor, what) {
+    // The first time: a hint about what the + holds (Settings, App, Hints).
+    if (!Hints.isOff('plus-menu') && !(open && open.anchor === anchor)) {
+      const fromHover = !!anchor.closest('#hovercard');
+      await Hints.show('plus-menu');
+      // The hint closes the hover card (the mouse leaves it to reach OK): open it again for
+      // the same title, then the menu on its +.
+      if (!document.contains(anchor) && fromHover) {
+        const card = [...document.querySelectorAll('.card')].find((c) => c.dataset.id === what.id);
+        if (card) showHover(card);
+        anchor = document.querySelector('#hovercard [data-act="menu-plus"]');
+      }
+      if (!anchor || !document.contains(anchor)) return;
+    }
     show(anchor, () => plusHTML(what));
     open.el.onclick = async (e) => {
       const b = e.target.closest('[data-m]');
@@ -108,7 +121,7 @@ const Menus = (() => {
       e.stopPropagation();
       close();
       if (b.dataset.m === 'reset') return resetWindow(target.id);
-      if (b.dataset.m === 'delete') return deleteWindow(target);
+      if (b.dataset.m === 'delete') return Hints.show('delete-bin').then(() => deleteWindow(target));
     };
   }
 
@@ -149,7 +162,7 @@ const Menus = (() => {
       <p class="pin-note">Reset intro skips for ${esc(s.title)}? Skip intro is found again from scratch, as if the episodes were new.</p>
       <div class="cpk-scope" role="radiogroup" aria-label="What to reset">
         <label><input type="radio" name="rs-scope" value="" checked /> The whole series</label>
-        ${s.seasons.map((x) => `<label><input type="radio" name="rs-scope" value="${x.number}" /> ${esc(seasonName(x))} <small style="color:var(--text-3)">${nEps(x.episodes.length)}</small></label>`).join('')}
+        ${s.seasons.map((x) => `<label><input type="radio" name="rs-scope" value="${x.number}" /> ${esc(seasonName(x))} <small style="color:var(--faint)">${nEps(x.episodes.length)}</small></label>`).join('')}
       </div>
       <div class="row-btns"><button class="btn btn-sm btn-ghost" id="rs-cancel">Cancel</button><button class="btn btn-sm btn-accent" id="rs-go">Reset</button></div>`);
     $('#rs-cancel', L).onclick = closeWin;
@@ -171,7 +184,7 @@ const Menus = (() => {
     const L = win(`<h2 class="pin-title">Delete from Couchbox</h2>
       ${series ? `<div class="cpk-scope" role="radiogroup" aria-label="What to delete">
         <label><input type="radio" name="dl-scope" value="" checked /> The whole series</label>
-        ${series.seasons.map((x) => `<label><input type="radio" name="dl-scope" value="${x.number}" /> ${esc(seasonName(x))} <small style="color:var(--text-3)">${nEps(x.episodes.length)}</small></label>`).join('')}
+        ${series.seasons.map((x) => `<label><input type="radio" name="dl-scope" value="${x.number}" /> ${esc(seasonName(x))} <small style="color:var(--faint)">${nEps(x.episodes.length)}</small></label>`).join('')}
       </div>` : ''}
       <p class="pin-note" id="dl-what">Checking…</p>
       <label class="dl-type"><span>Type <b>DELETE</b> to confirm</span><input class="input" id="dl-word" autocomplete="off" spellcheck="false" aria-label="Type DELETE to confirm" /></label>

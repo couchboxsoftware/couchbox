@@ -315,7 +315,7 @@ function openProfileEditor(pid, first = false) {
   const lockHTML = () => {
     if (first) return '';
     const row = (sub, buttons) => `<div class="pe-lock"><span class="t-text"><b>Profile lock</b><small>${sub}</small></span>${buttons}</div>`;
-    if (p.kids) return lockedNow() ? `<p class="pe-note" style="color:var(--text-2);margin:8px 0 0">Kids profiles can't have a PIN, so this profile's PIN is removed when you save.</p>` : '';
+    if (p.kids) return lockedNow() ? `<p class="pe-note" style="color:var(--muted);margin:8px 0 0">Kids profiles can't have a PIN, so this profile's PIN is removed when you save.</p>` : '';
     if (lockedNow()) return row('A PIN is asked for to open this profile, change it or open Settings.', '<button class="btn btn-sm btn-ghost" id="pe-pin-change">Change PIN</button><button class="btn btn-sm btn-ghost" id="pe-pin-remove">Remove PIN</button>');
     if (pendingPin) return row('The PIN is added when you save.', `<button class="btn btn-sm btn-ghost" id="pe-pin-undo">Don't add it</button>`);
     return row('Ask for a 4-number PIN to open this profile.', '<button class="btn btn-sm btn-ghost" id="pe-pin-add">Add PIN</button>');
@@ -495,6 +495,7 @@ function renderBrowse(app) {
     <div class="brand" data-act="tab" data-tab="home">${brandHTML()}</div>
     <nav class="tabs">${tabs.map(([k, l]) => `<button class="tab ${S.tab === k && !S.query ? 'active' : ''}" data-act="tab" data-tab="${k}">${l}</button>`).join('')}<button class="tab ${S.tab === 'unmatched' && !S.query ? 'active' : ''}" data-act="tab" data-tab="unmatched" hidden>Unmatched <span class="tab-count"></span></button></nav>
     <div class="nav-right">
+      ${S.settings.testVersion ? '<span class="cb-test" title="Running from the source folder, with its own settings">Test version</span>' : ''}
       <label class="searchbox ${S.query ? 'open' : ''}" id="searchbox">${ICON.search}<input id="search" placeholder="Titles, episodes, genres" value="${esc(S.query)}" spellcheck="false" /></label>
       <button class="exit-full" data-act="exit-full" aria-label="Exit full screen" title="Exit full screen (Esc)">${ICON.unfull}</button>
       ${S.profile.kids ? '<span class="badge" style="border-color:var(--accent);color:var(--accent)">KIDS</span>' : ''}
@@ -893,7 +894,7 @@ function renderDetails() {
           ${pieShown ? DL.pie(dlFile) : `<button class="btn btn-light" data-act="play" data-id="${esc(item.id)}">${ICON.play}${esc(info ? info.label : 'Play')}</button>`}
           ${info && info.pct > 0 ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="restart" data-id="${esc(item.id)}">Start over</button>` : ''}
           ${Menus.buttonsHTML(item)}
-          ${fileItem ? `<button class="round" data-act="mark" data-file="${esc(item.id)}" title="${isWatched(S.progress[item.id]) ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="Toggle watched" style="${isWatched(S.progress[item.id]) ? 'background:var(--good);border-color:var(--good)' : ''}">${ICON.check}</button>` : ''}
+          ${fileItem ? `<button class="round" data-act="mark" data-file="${esc(item.id)}" title="${isWatched(S.progress[item.id]) ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="Toggle watched" style="${isWatched(S.progress[item.id]) ? 'background:var(--ok);border-color:var(--ok)' : ''}">${ICON.check}</button>` : ''}
           ${continueWatching(null).some((x) => x.item.id === item.id) ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="cw-hide" data-id="${esc(item.id)}">${ICON.x}Remove from Continue watching</button>` : ''}
         </div>
       </div>
@@ -1022,11 +1023,12 @@ function showSettings(err, tab) {
         ['fullscreen', 'Full screen', 'No title bar or taskbar. Esc or F11 leaves it.'],
         ['remember', 'Remember last', 'Opens exactly as you left it.'],
       ].map(([v, l, d]) => `<label class="open-mode"><input type="radio" name="open-mode" value="${v}" ${st.openMode === v ? 'checked' : ''} /><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
-      <label class="toggle" style="margin-top:12px"><span class="t-text"><b>Start with Windows</b><small>Couchbox starts hidden by the clock, ready to convert new videos. Closing the window always keeps it running there.</small></span><span class="switch"><input type="checkbox" data-setting="startWithWindows" ${st.startWithWindows ? 'checked' : ''} /><span></span></span></label>
+      <label class="toggle" style="margin-top:12px"><span class="t-text"><b>Start with Windows</b><small>Couchbox starts hidden by the clock, ready to convert new videos. Closing the window always keeps it running there.${st.testVersion ? ' (The test version only remembers this; it never changes Windows.)' : ''}</small></span><span class="switch"><input type="checkbox" data-setting="startWithWindows" ${st.startWithWindows ? 'checked' : ''} /><span></span></span></label>
       ${st.shellMenuAvailable ? `<label class="toggle"><span class="t-text"><b>Show Couchbox in the right-click menu</b><small>Right-click videos or folders in File Explorer and choose Couchbox, then Copy or Move to Couchbox. On Windows 11 it's under Show more options.</small></span><span class="switch"><input type="checkbox" id="set-shellmenu" ${st.shellMenu ? 'checked' : ''} /><span></span></span></label><div class="err" id="shellmenu-err" hidden></div>` : ''}
     </div>
     <div class="settings-section"><h3>Updates</h3><div id="settings-updates"></div></div>
-    <div class="settings-section"><h3>What's new</h3><div id="settings-whatsnew"></div></div>`,
+    <div class="settings-section"><h3>What's new</h3><div id="settings-whatsnew"></div></div>
+    <div class="settings-section" id="settings-hints"><h3>Hints</h3>${Hints.settingsHTML()}</div>`,
   }[tab];
   $('#modal-root').innerHTML = `${ov}<div class="dialog settings-dlg" style="width:min(640px,92vw)">
     ${head}${body}
@@ -1346,6 +1348,14 @@ document.addEventListener('click', async (e) => {
     case 'close-modal':
       closeModal();
       break;
+    case 'hint-reset':
+    case 'hints-reset-all': {
+      await (act === 'hint-reset' ? Hints.reset(el.dataset.id) : Hints.resetAll());
+      const box = $('#settings-hints');
+      if (box) box.innerHTML = '<h3>Hints</h3>' + Hints.settingsHTML();
+      toast(act === 'hint-reset' ? 'That hint will show again.' : 'All hints will show again.', 2200);
+      break;
+    }
     case 'settings-tab':
       openSettings(null, el.dataset.tab);
       break;
@@ -1406,7 +1416,18 @@ document.addEventListener('mouseout', (e) => {
 });
 $('#hovercard').addEventListener('mouseleave', hideHover);
 document.addEventListener('keydown', (e) => {
-  if (Player.isOpen()) return;
+  if (Player.isOpen()) return; // the player has its own keys (and Ctrl+, does nothing there)
+  // Ctrl+, opens Settings from anywhere, the same way as the profile menu (the PIN and the kids
+  // tabs apply). Not before a profile is picked, and not while a PIN screen is up.
+  if (e.key === ',' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    if (S.profile && S.settings && S.settings.libraryPath && !Pin.isOpen()) {
+      $('#pmenu') && $('#pmenu').remove();
+      Menus.close();
+      openSettings();
+    }
+    return;
+  }
   if (e.key === 'Escape') {
     if ($('#pmenu')) $('#pmenu').remove();
     else if ($('#modal-root').innerHTML) {

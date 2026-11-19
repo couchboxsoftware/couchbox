@@ -1,32 +1,27 @@
 // In-app updates via electron-updater. New versions are published to GitHub Releases
 // (see "build.publish" in package.json and "Publishing an update" in the README).
 //
-// Flow: check quietly on start-up and every few hours -> tell the window "update available"
+// Flow: check quietly as soon as Couchbox is up, then every 6 hours -> tell the window "update available"
 // -> the user clicks "Update now" -> download with progress -> restart into the new version.
 // Nothing is downloaded until the user asks for it.
 //
-// The portable .exe can't update itself, so for it "Update now" opens the release page instead.
-//
 // Testing: set COUCHBOX_UPDATE_URL to a local folder server (http://localhost:PORT/) that holds
 // latest.yml and the installer. Only localhost addresses are accepted.
-const fs = require('fs');
 const path = require('path');
-const { app, shell } = require('electron');
+const { app } = require('electron');
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
-const FIRST_CHECK_DELAY_MS = 8000;
 
 // canInstall(): false while conversions are running; the downloaded update then waits for them
 // ("Will update when conversions finish"), and onWaiting() stops new ones starting meanwhile.
 function create({ send, canInstall = () => true, onWaiting = () => {} }) {
-  const portable = !!process.env.PORTABLE_EXECUTABLE_DIR;
   const testUrl = (process.env.COUCHBOX_UPDATE_URL || '').trim();
   const useTestUrl = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(testUrl);
   const enabled = app.isPackaged || useTestUrl;
 
   // Couchbox's own version (app.getVersion() reports Electron's when run from source).
   const current = require('../../package.json').version;
-  const state = { status: enabled ? 'idle' : 'off', current, version: null, notes: '', percent: 0, error: null, portable };
+  const state = { status: enabled ? 'idle' : 'off', current, version: null, notes: '', percent: 0, error: null };
   const emit = (patch) => {
     Object.assign(state, patch);
     send('update', { ...state });
@@ -89,10 +84,6 @@ function create({ send, canInstall = () => true, onWaiting = () => {} }) {
 
   async function download() {
     if (!autoUpdater || !state.version) return { ...state };
-    if (portable) {
-      shell.openExternal(releasePage());
-      return { ...state };
-    }
     emit({ status: 'downloading', percent: 0, error: null });
     autoUpdater.downloadUpdate().catch((err) => emit({ status: 'error', error: short(err) }));
     return { ...state };
@@ -108,19 +99,10 @@ function create({ send, canInstall = () => true, onWaiting = () => {} }) {
 
   function start() {
     if (!autoUpdater) return;
-    setTimeout(() => check(false), FIRST_CHECK_DELAY_MS);
+    // As soon as the main window is up (or, started hidden in the tray, once it has loaded: the
+    // banner is waiting when it's opened). No delay.
+    check(false);
     setInterval(() => check(false), CHECK_EVERY_MS).unref?.();
-  }
-
-  // The release page for the configured GitHub repo (written into app-update.yml at build time).
-  function releasePage() {
-    try {
-      const yml = fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8');
-      const owner = /owner:\s*(\S+)/.exec(yml)?.[1];
-      const repo = /repo:\s*(\S+)/.exec(yml)?.[1];
-      if (owner && repo) return `https://github.com/${owner}/${repo}/releases/latest`;
-    } catch (_) {}
-    return useTestUrl ? testUrl : 'https://github.com';
   }
 
   return { start, check, download, installNow, getState: () => ({ ...state }) };

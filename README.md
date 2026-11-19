@@ -4,36 +4,29 @@ A streaming-style player for the films and series on your own computer.
 
 ## Install
 
-Download the latest version from the [Releases page](https://github.com/couchboxsoftware/couchbox/releases/latest):
+The latest version is on the [Releases page](https://github.com/couchboxsoftware/couchbox/releases/latest). Download `Couchbox-Setup-<version>.exe` and run it. It installs Couchbox for you only (no admin needed) in one click, with a Start menu and desktop shortcut, and asks nothing. Run over an earlier Couchbox, it installs in the same place and keeps your settings, profiles and shortcuts. The installed app updates itself (see below).
 
-- `Couchbox-Setup-<version>.exe` installs Couchbox with a Start menu and desktop shortcut. The installed app updates itself (see below).
-- `Couchbox-Portable-<version>.exe` runs without installing. Handy on a USB stick. It starts more slowly than the installed version, because Windows unpacks it each time before the splash appears. It can't update itself: when there's a new version it offers to open the download page.
+There's no portable version any more: 0.3.13 was the last one. If you used it, install Couchbox instead. Your settings are in the same place, so it picks up where the portable one left off.
 
 Couchbox isn't code-signed, so Windows may show "Windows protected your PC" the first time, and some antivirus apps scan it before it opens. Click **More info**, then **Run anyway**.
 
 ## Updates
 
-A few seconds after it starts (and every 6 hours while it's open), Couchbox checks GitHub Releases for a newer version. If there is one, a banner in the bottom-right corner says **Update available**, with **Update now** and **Later**. **Update now** downloads the new version with a progress bar, then restarts into it. Nothing downloads until you click it. You can also check by hand in **Settings → App**, under Updates.
+As soon as it opens, and every 6 hours while it's open, Couchbox checks GitHub Releases for a newer version. If there is one, a banner in the bottom-right corner says **Update available**, with **Update now** and **Later**. **Update now** downloads the new version with a progress bar, then restarts into it. Nothing downloads until you click it. You can also check by hand in **Settings → App**, under Updates. Started hidden in the tray, it checks too, and the banner is waiting when you open it.
 
 ### Publishing an update
 
-**One-time setup: a GitHub token**
+1. Add an entry at the top of `CHANGELOG.md`, following the template at the top of that file, like `## 0.4.1 · 20 Nov 2026`. Its headline is what the update banner shows; the whole entry becomes the release notes.
+2. Commit your changes.
+3. Run `npm run release -- 0.4.1`.
 
-1. On GitHub, open **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
-2. Under **Repository access**, choose **Only select repositories** and pick `couchbox`. Under **Repository permissions**, set **Contents** to **Read and write**.
-3. Save it as a Windows user variable called `GH_TOKEN`: press Start, type **environment variables**, open **Edit environment variables for your account**, click **New**, then **OK** in both windows.
+This checks the changelog entry, that everything's committed, that the GitHub CLI is signed in (`gh auth login`, once; install it with `winget install GitHub.cli`) and that the version is new. Then it sets the version in `package.json` and `package-lock.json`, copies the project to `%TEMP%\couchbox-build` and builds the installer there (the installer tool fails on long paths), and brings `Couchbox-Setup-0.4.1.exe`, its `.blockmap` and `latest.yml` back to `dist\`. Last, it commits, tags `v0.4.1`, pushes, creates the GitHub release with those three files and the changelog entry as its notes, and checks all three arrived.
 
-**Each release**
-
-```
-powershell -File tools\release.ps1 -Bump patch -Notes "Added an Open folder button in Settings."
-```
-
-This raises the version (`-Bump patch`: 0.3.0 → 0.3.1; `-Bump minor`: 0.3.x → 0.4.0), builds the installer and portable exe from a short folder path, uploads the matching source to `main`, then uploads the exes, `latest.yml` and blockmap to a GitHub release named after the version, attaches the notes and checks all four files arrived. A copy of just that version is left in `dist\`. The notes appear in the in-app update banner. Add `-NoPublish` to build without uploading anything.
+`npm run release -- 0.4.1 --dry-run` does the checks it can and the build, without committing, pushing or publishing anything (and without changing `package.json`). To build the installer only, run `npm run dist`.
 
 Couchbox is pre-release, so versions stay below 1.0: small updates go `0.3.0` → `0.3.1` → `0.3.2`, and bigger ones `0.3.x` → `0.4.0`. Installed copies only offer an update when the number is higher than theirs, so never publish a `1.x` until you mean to leave 0.x behind.
 
-The repo has to be public so installed copies can read its releases without a password. `node tools/push-source.js "message"` uploads the source on its own (`--dry-run` lists what would go up). Build output, `node_modules` and design previews are left out.
+The repo has to be public so installed copies can read its releases without a password. Build output, `node_modules`, private notes and design previews are left out (`.gitignore`).
 
 ## Folder layout
 
@@ -61,20 +54,24 @@ Videos\
 
 ## Settings
 
-Open Settings from the profile menu. It has four tabs along the top and reopens on the last one you used (until Couchbox closes):
+Open Settings from the profile menu, or with **Ctrl+,** from anywhere (not while a video is playing; a profile with a PIN asks for it, as from the menu). It has four tabs along the top and reopens on the last one you used (until Couchbox closes):
 
 - **Library**: your video folder (Change folder, Rescan now, Open folder), your TMDB key, and copies and versions (see below).
 - **Find videos**: see below.
 - **Playback**: autoplay next episode, previews, and conversions (see below).
-- **App**: sounds, what happens when Couchbox opens, Start with Windows, the right-click menu, updates (with the version number) and What's new.
+- **App**: sounds, what happens when Couchbox opens, Start with Windows, the right-click menu, updates (with the version number), What's new, and Hints.
 
-Kids profiles see only Playback and App. Settings for one title (kids, Fix match) stay on that title's page.
+Kids profiles see only Playback and App.
+
+Hints are short tips that pop up the first time you do something that needs explaining: opening **+** on a title, and choosing Delete from Couchbox. Each has **Don't show this again**. **Settings → App → Hints** lists them all, with **Show again** for any you've turned off and **Show all hints again**.
+
+Settings for one title (kids, Fix match) stay on that title's page.
 
 ## What's new
 
 **Settings → App → What's new** lists every version, newest first, with what it added, improved and fixed. After an update, a card shows the new version's notes once.
 
-Every version's notes are written once, in `CHANGELOG.md`, using the template at the top of that file (a headline, then New, Improved and Fixed). The app reads them from there, the Update available banner shows the headline, and `tools\release.ps1` uses the entry for the GitHub release notes. It won't publish a version that has no entry.
+Every version's notes are written once, in `CHANGELOG.md`, using the template at the top of that file (a headline, then New, Improved and Fixed). The app reads them from there, the Update available banner shows the headline, and the release script (`npm run release`) uses the entry for the GitHub release notes. It won't publish a version that has no entry.
 
 ## Conversions
 
@@ -179,11 +176,11 @@ Titles Couchbox couldn't be sure of are listed on an **Unmatched** tab (with a c
 - Sounds: a theatre organ plays on the splash and a warm chord when the window opens; buttons, tabs, cards, profiles, My list and Settings toggles give a quiet tap (never during a video). In **Settings → App**, under Sounds: opening sounds on or off (whole app), click sounds on or off (each profile has its own), and one volume slider. The sounds are generated by `renderer/sounds.js`; there are no audio files.
 - **Settings → App**, under When Couchbox opens: Window (1400 × 860), Maximised, Full screen (the default) or Remember last (size, position, maximised or full screen, as you left it).
 
-Keyboard in the player: Space play/pause, Left/Right skip 10s, Up/Down volume, F full screen, M mute, N next episode, S or Enter skip intro (while Skip shows), Esc back. F11 switches full screen anywhere.
+Keyboard in the player: Space play/pause, Left/Right skip 10s, Up/Down volume, F full screen, M mute, N next episode, S or Enter skip intro (while Skip shows), Esc back. F11 switches full screen anywhere, and Ctrl+, opens Settings (except in the player).
 
 ## Where data is kept
 
-`%APPDATA%\Couchbox`: profiles, progress, cached posters, thumbnails and the conversion queue. Delete that folder to reset the app. Couchbox only changes your videos to convert ones that won't play (with the original kept in `.couchbox-bin` for up to 7 days), and when you use Find videos.
+`%APPDATA%\Couchbox` (`%APPDATA%\Couchbox Test Version` for the test version): profiles, progress, cached posters, thumbnails and the conversion queue. Delete that folder to reset the app. Couchbox only changes your videos to convert ones that won't play (with the original kept in `.couchbox-bin` for up to 7 days), and when you use Find videos.
 
 ## Licence
 
@@ -197,13 +194,15 @@ Needs Node.js.
 
 ```
 npm install
-npm start            # run in development
-powershell -File tools\release.ps1 -NoPublish   # build the .exe files into dist\
+npm start                                # run the test version
+npm run release -- 0.4.0 --dry-run       # build the installer into dist\ from a short folder
 ```
 
-`npm run dist` also builds, but fails with "could not open file" errors when the project folder's path is long; `tools\release.ps1` avoids that by building from a short temporary folder.
+`npm run dist` also builds, but fails with "could not open file" errors when the project folder's path is long; the release script avoids that by building from a short temporary folder.
 
-`test/snap.js` drives the real app against a folder of videos and saves screenshots. `node test/season-folders-check.js` checks season-pack folder names, and `test/season-migrate-check.js` checks settings carry over when split shows merge. `test/avatar-check.js` checks the picture cropper, saving, Cancel, Remove and clean-up. `test/sound-window-check.ps1` checks the sounds and every "When Couchbox opens" choice across several launches. `test/settings-tabs-check.js` checks each Settings tab holds the right settings, still saves them, reopens on the last tab, shows TMDB key problems on Library, and shows kids only Playback and App. `test/conversion-check.js` makes test videos with FFmpeg and checks automatic conversion end to end: the queue order, the 5 + 1 limit, Queue next, the safe swap, a broken file, the bin rules, Restore, Pause, the space warning and kids. `test/background-check.js` checks the tray (colour, status, menu, Pause/Resume), hiding on close while conversions carry on, a file added while hidden, a second launch, Start with Windows (with a stand-in, so it never touches the registry), Quit while converting, and a hidden `--background` start. `test/update-check.js` with `COUCHBOX_UPDATE_WAIT=1` checks an update waits for a running conversion. `test/download-check.js` fakes downloads arriving (growing, temporarily named then renamed, torrent-style filled in out of order, cancelled half way, missing a middle, and changing during a conversion) and checks they show as Downloading or Incomplete, aren't converted early, and become normal once finished. `test/whatsnew-check.js` checks every CHANGELOG entry follows the template, the What's new list and the card after an update. `test/unmatched-check.js` checks the Unmatched tab and Fix match (preview, year and kind search, tidying into Films or Series, waiting while playing). `test/copies-check.js` checks spare copies, the best-copy pick, Move to bin, Keep both, and the three choices for a different version. `test/context-menu-check.js` checks the right-click menu (in a throwaway registry key, never the real one), Copy and Move, folders, already-there files and the notifications. `test/intro-detect-check.js` makes test seasons with a shared theme and checks intro detection (cold opens, logos, a theme broken in the middle, a shortened one, none, after 10 minutes, one-episode seasons, films, not checking twice) and the player's Skip, Guessed, the question, Yes and No. `node test/matcher-check.js` checks the matching against a made-up TMDB (a year at the start, a title that is a year, remakes by length, a wrong year, a special edition, weak answers turned down, the retries, series lengths). `test/rematch-check.js` checks it in the app: the one-time check of earlier matches, Fix match picks left alone, and the best guesses in Fix match. `test/title-menu-check.js` checks the + and cog menus (My list and collection ticks, Reset intro skips for a season and a series, Delete for a film, a season and an episode with the typed DELETE, the bin and Restore, refused while playing and for kids). `test/collections-check.js` checks collections (making them, every way of adding, the orders and dragging, the rows and the 50% rule, sharing and only the maker editing, kids, a missing file, Fix match moves, deleted profiles). `test/continue-watching-check.js` checks Remove from Continue watching (hover card and title page, films and series, Undo, coming back, per profile, Fix match moves). `test/player-wake-check.js` moves the mouse for real to check the player's controls ignore knocks and drifts but wake for a longer move, a shake, a click and the volume keys. `test/pin-check.js` checks the profile lock: the main-process rules (hashes only, the wait after 5 wrong tries, saves refused without the right PIN, the kids gap) and the app (adding a PIN, the full-screen PIN with the pad and keyboard, Settings, Forgot PIN? with Windows Hello stood in for via `COUCHBOX_HELLO_STUB`, Change and Remove PIN, the tray). `test/click-off-check.js` uses real mouse presses and releases to check that windows and menus only close when both are outside them (including a text selection dragged past a window's edge). All tests mute the app and turn automatic conversion off (`test/quiet.js`), so they never rewrite sample videos. `test/player-check.js` checks auto full screen, Esc/F11/the exit button and the next-episode timings. `test/finder-check.js` runs Find videos against a throwaway test folder (new films, copies, versions, files already in the library, a name clash, Copy, Move and Stop). `test/update-check.js` serves a built installer from a local stand-in release server and walks through the update banner, stopping just before it would install.
+Run from source, Couchbox is the test version: a yellow **Test version** badge in the nav bar, its own settings in `%APPDATA%\Couchbox Test Version`, and it never changes the installed Couchbox's Start with Windows or right-click menu. So it runs alongside the installed one. Tests set `COUCHBOX_DATA_DIR` to a throwaway folder, which wins over both.
+
+`test/snap.js` drives the real app against a folder of videos and saves screenshots. `node test/season-folders-check.js` checks season-pack folder names, and `test/season-migrate-check.js` checks settings carry over when split shows merge. `test/avatar-check.js` checks the picture cropper, saving, Cancel, Remove and clean-up. `test/sound-window-check.ps1` checks the sounds and every "When Couchbox opens" choice across several launches. `test/settings-check.js` checks each Settings tab holds the right settings, still saves them, reopens on the last tab, shows TMDB key problems on Library, and shows kids only Playback and App. `test/startup-check.js` checks the splash shows on its own, steps through the loading, stays at least 2.3 seconds and hands over to the main window, that only one Couchbox runs (a second one exits and shows the first), F11, and Ctrl+, (Settings, but not while the player is open). `test/close-check.js` checks windows only close on a press and release outside them (and on Esc), the close button hides Couchbox to the tray, and Quit asks while a conversion is running (Keep running, then Quit). `test/hints-check.js` checks the tips (the + and Delete tips show first, Don't show this again is saved, Esc, and Settings, App, Hints with Show again and Show all hints again). `test/protocol-check.js` checks pages load from `app://couchbox/`, media only from the video and data folders (byte ranges, refusing anything outside, `..` and look-alike folders), and that MP4 and MKV play, seek, show subtitles and scrub thumbnails, and hover previews play, without breaking the Content-Security-Policy. `test/conversion-check.js` makes test videos with FFmpeg and checks automatic conversion end to end: the queue order, the 5 + 1 limit, Queue next, the safe swap, a broken file, the bin rules, Restore, Pause, the space warning and kids. `test/background-check.js` checks the tray (colour, status, menu, Pause/Resume), hiding on close while conversions carry on, a file added while hidden, a second launch, Start with Windows (with a stand-in, so it never touches the registry), Quit while converting, and a hidden `--background` start. `test/update-check.js` with `COUCHBOX_UPDATE_WAIT=1` checks an update waits for a running conversion. `test/download-check.js` fakes downloads arriving (growing, temporarily named then renamed, torrent-style filled in out of order, cancelled half way, missing a middle, and changing during a conversion) and checks they show as Downloading or Incomplete, aren't converted early, and become normal once finished. `test/whatsnew-check.js` checks every CHANGELOG entry follows the template, the What's new list and the card after an update. `test/unmatched-check.js` checks the Unmatched tab and Fix match (preview, year and kind search, tidying into Films or Series, waiting while playing). `test/copies-check.js` checks spare copies, the best-copy pick, Move to bin, Keep both, and the three choices for a different version. `test/context-menu-check.js` checks the right-click menu (in a throwaway registry key, never the real one), Copy and Move, folders, already-there files and the notifications. `test/intro-detect-check.js` makes test seasons with a shared theme and checks intro detection (cold opens, logos, a theme broken in the middle, a shortened one, none, after 10 minutes, one-episode seasons, films, not checking twice) and the player's Skip, Guessed, the question, Yes and No. `node test/matcher-check.js` checks the matching against a made-up TMDB (a year at the start, a title that is a year, remakes by length, a wrong year, a special edition, weak answers turned down, the retries, series lengths). `test/rematch-check.js` checks it in the app: the one-time check of earlier matches, Fix match picks left alone, and the best guesses in Fix match. `test/title-menu-check.js` checks the + and cog menus (My list and collection ticks, Reset intro skips for a season and a series, Delete for a film, a season and an episode with the typed DELETE, the bin and Restore, refused while playing and for kids). `test/collections-check.js` checks collections (making them, every way of adding, the orders and dragging, the rows and the 50% rule, sharing and only the maker editing, kids, a missing file, Fix match moves, deleted profiles). `test/continue-watching-check.js` checks Remove from Continue watching (hover card and title page, films and series, Undo, coming back, per profile, Fix match moves). `test/player-wake-check.js` moves the mouse for real to check the player's controls ignore knocks and drifts but wake for a longer move, a shake, a click and the volume keys. `test/pin-check.js` checks the profile lock: the main-process rules (hashes only, the wait after 5 wrong tries, saves refused without the right PIN, the kids gap) and the app (adding a PIN, the full-screen PIN with the pad and keyboard, Settings, Forgot PIN? with Windows Hello stood in for via `COUCHBOX_HELLO_STUB`, Change and Remove PIN, the tray). `test/click-off-check.js` uses real mouse presses and releases to check that windows and menus only close when both are outside them (including a text selection dragged past a window's edge). All tests mute the app and turn automatic conversion off (`test/quiet.js`), so they never rewrite sample videos. `test/player-check.js` checks auto full screen, Esc/F11/the exit button and the next-episode timings. `test/finder-check.js` runs Find videos against a throwaway test folder (new films, copies, versions, files already in the library, a name clash, Copy, Move and Stop). `test/update-check.js` serves a built installer from a local stand-in release server, checks Couchbox asks for an update as soon as it opens, and walks through the update banner, stopping just before it would install (`COUCHBOX_UPDATE_HIDDEN=1` checks a hidden tray start looks too, and the banner is waiting when it's opened).
 
 The logo (a line-drawn sofa), the app icon and the bold `couchbox` wordmark are defined in `renderer/brand.js`. After editing it, run `node_modules\electron\dist\electron.exe tools/render-icon.js` to regenerate `build/icon.png`, `build/icon-preview.png` and the tray icons in `build/tray/`.
 

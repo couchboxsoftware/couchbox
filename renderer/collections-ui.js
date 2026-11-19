@@ -182,7 +182,7 @@ const Coll = (() => {
                 ${have.has(k) ? '<span class="cp-added">Added</span>' : `<button class="btn btn-sm btn-ghost" data-act="coll-search-add" data-id="${esc(i.id)}">${ICON.plus}Add</button>`}</div>`;
             })
             .join('')
-        : '<p style="color:var(--text-2);margin:6px 0">No titles match.</p>';
+        : '<p style="color:var(--muted);margin:6px 0">No titles match.</p>';
     };
     q.addEventListener('input', debounce(results, 120));
     if (open.query) {

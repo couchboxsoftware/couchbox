@@ -16,8 +16,16 @@ const { Intros } = require('./src/main/intros');
 const pinsLib = require('./src/main/pins');
 const hello = require('./src/main/hello');
 const collectionsLib = require('./src/main/collections');
+const appProtocol = require('./src/main/app-protocol'); // app://couchbox/ (pages and media)
 
 if (process.env.COUCHBOX_DATA_DIR) app.setPath('userData', process.env.COUCHBOX_DATA_DIR);
+// Running from the source folder (npm start) is the test version: it has its own settings, so it
+// runs alongside the installed Couchbox instead of handing over to it. It never changes the
+// installed Couchbox's registry entries (Start with Windows, the right-click menu: see
+// background.js and shell-menu.js, which only write them from the installed app).
+else if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'Couchbox Test Version'));
+const TEST_VERSION = !app.isPackaged;
+appProtocol.registerScheme(); // before the app is ready
 
 // One Couchbox at a time: opening it again (Start menu, desktop) shows the one already running,
 // even when it's hidden in the tray. (The lock is per data folder, so tests don't clash.)
@@ -225,7 +233,7 @@ function createWindow() {
       win.setBounds({ x: b.x - (a.x - b.x), y: b.y - (a.y - b.y), width: b.width - (a.width - b.width), height: b.height - (a.height - b.height) });
   }
   // The main window stays hidden until the splash hands over (see showMainWindow).
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.loadURL(appProtocol.pageUrl('renderer/index.html'));
   bg.attach(win); // the close button hides to the tray; a real quit saves the window state too
   win.on('close', () => bg.isQuitting() && saveWindowState());
   win.on('enter-full-screen', () => send('fullscreen', true));
@@ -281,7 +289,8 @@ function createSplash() {
   splash.on('closed', () => (splash = null));
   // The splash plays the opening organ itself, if opening sounds are on.
   const sound = store.data.settings.openingSounds !== false ? '1' : '0';
-  splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'), { query: { v: require('./package.json').version, sound, vol: String(soundVolume()) } });
+  const q = new URLSearchParams({ v: require('./package.json').version, sound, vol: String(soundVolume()) });
+  splash.loadURL(appProtocol.pageUrl('renderer/splash.html?' + q));
 }
 
 function runSplash(code) {
@@ -308,7 +317,7 @@ function maybeFinishSplash() {
       setTimeout(() => {
         if (win && !win.isDestroyed()) showMainWindow();
         if (splash && !splash.isDestroyed()) splash.close();
-        updates.start(); // first update check a few seconds after the app is up
+        updates.start(); // checks for an update straight away, then every 6 hours
       }, 420);
     }, 650);
   }, wait);
@@ -320,6 +329,8 @@ ipcMain.on('app-ready', () => {
 });
 
 app.whenReady().then(() => {
+  // Pages from the app folder; media only from the video folder and Couchbox's data folder.
+  appProtocol.handle({ appRoot: __dirname, mediaRoots: () => [library && library.root, app.getPath('userData')] });
   Menu.setApplicationMenu(null);
   updates = updater.create({
     send,
@@ -501,12 +512,14 @@ const publicSettings = () => {
     startWithWindows: !!s.startWithWindows,
     shellMenu: s.shellMenu !== false,
     shellMenuAvailable: shellMenu.available(),
+    testVersion: TEST_VERSION, // the yellow "Test version" badge
+    hintsOff: s.hintsOff || {}, // hint pop-ups turned off (renderer/hints.js)
   };
 };
 
 ipcMain.handle('init', () => ({
   settings: publicSettings(),
-  avatarBase: require('url').pathToFileURL(avatarDir).href + '/',
+  avatarBase: appProtocol.mediaUrl(avatarDir + path.sep), // + the picture's file name (app-protocol.js)
   profiles: pins.publicProfiles(), // never the PIN hashes, just locked: true
   lastProfile: store.data.lastProfile,
   introData: intros.view(),
@@ -556,6 +569,10 @@ ipcMain.handle('settings:set', (_e, patch) => {
   const allowed = ['volume', 'autoplayNext', 'previews', 'openingSounds', 'soundVolume', 'openMode', 'autoConvert', 'startWithWindows'];
   if ('startWithWindows' in patch) bg.setStartWithWindows(!!patch.startWithWindows);
   for (const k of allowed) if (k in patch) store.data.settings[k] = patch[k];
+  // Hints turned off ("Don't show this again"): { id: when }. Only short ids and times are kept.
+  if (patch.hintsOff && typeof patch.hintsOff === 'object') {
+    store.data.settings.hintsOff = Object.fromEntries(Object.entries(patch.hintsOff).filter(([k, v]) => /^[a-z0-9-]{1,40}$/i.test(k) && typeof v === 'number'));
+  }
   if ('openMode' in patch && !OPEN_MODES.includes(patch.openMode)) store.data.settings.openMode = 'fullscreen';
   store.save();
   if ('autoConvert' in patch) {
@@ -846,7 +863,7 @@ ipcMain.handle('update:install-now', () => {
 ipcMain.handle('app:quit', () => bg.requestQuit());
 // The right-click menu switch: adds or removes the menu straight away. Returns a problem, or ''.
 ipcMain.handle('shellmenu:set', async (_e, on) => {
-  if (!shellMenu.available()) return "The right-click menu needs the installed Couchbox (not the portable one).";
+  if (!shellMenu.available()) return "The right-click menu needs the installed Couchbox (not the test version).";
   const err = await (on ? shellMenu.register() : shellMenu.unregister());
   if (!err) {
     store.data.settings.shellMenu = !!on;

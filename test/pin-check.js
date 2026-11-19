@@ -10,6 +10,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { app } = require('electron');
+// The app:// scheme must be set up before the app is ready; main.js loads later here.
+require('../src/main/app-protocol.js').registerScheme();
 const { TEST_SETTINGS } = require('./quiet');
 
 process.env.COUCHBOX_NO_LOGIN_ITEM = '1';

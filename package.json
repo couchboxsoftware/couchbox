@@ -14,8 +14,8 @@
   "scripts": {
     "start": "electron .",
     "snap": "electron test/snap.js",
-    "dist": "electron-builder --win",
-    "release": "electron-builder --win --publish always"
+    "dist": "electron-builder --win --publish never",
+    "release": "node tools/release.js"
   },
   "build": {
     "appId": "app.couchbox.player",
@@ -41,21 +41,16 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "icon": "build/icon.png"
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
       "createDesktopShortcut": true,
       "include": "build/installer.nsh",
       "shortcutName": "Couchbox",
       "artifactName": "Couchbox-Setup-${version}.exe"
-    },
-    "portable": {
-      "artifactName": "Couchbox-Portable-${version}.exe"
     },
     "publish": {
       "provider": "github",
@@ -65,12 +60,12 @@
     }
   },
   "dependencies": {
-    "electron-updater": "^6.8.11",
-    "ffmpeg-static": "^5.3.0"
+    "electron-updater": "6.8.11",
+    "ffmpeg-static": "5.3.0"
   },
   "devDependencies": {
-    "electron": "^45.3.2",
-    "electron-builder": "^26.18.0"
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
   },
   "allowScripts": {
     "ffmpeg-static@5.3.0": true,

@@ -164,10 +164,10 @@ function create({ getWindow, store, getConverter, showWindow, saveWindowState, s
   }
 
   /* ---------- Start with Windows ---------- */
-  // Uses the exe the person runs (for the portable version, the portable file itself), and starts
-  // hidden with --background. Tests and the unpackaged app keep it in memory instead.
+  // Uses the installed exe, and starts hidden with --background. Tests and the unpackaged app
+  // keep it in memory instead.
   const real = () => app.isPackaged && !process.env.COUCHBOX_NO_LOGIN_ITEM;
-  const exe = () => process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  const exe = () => process.execPath;
   function setStartWithWindows(on) {
     if (real()) app.setLoginItemSettings({ openAtLogin: !!on, path: exe(), args: ['--background'] });
     else fakeLogin.openAtLogin = !!on;

@@ -1,7 +1,7 @@
 // Settings tabs: Library, Find videos, Playback and App for grown-up profiles; only Playback and
 // App for kids. Checks each setting is on the right tab and still saves, that Settings reopens on
 // the last tab used, that a TMDB key problem shows on Library, and saves a screenshot of each tab.
-// Usage: npx electron test/settings-tabs-check.js   (screenshots go to COUCHBOX_SNAP_OUT, or a temp folder)
+// Usage: npx electron test/settings-check.js   (screenshots go to COUCHBOX_SNAP_OUT, or a temp folder)
 const path = require('path');
 const fs = require('fs');
 const os = require('os');

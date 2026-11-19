@@ -20,6 +20,20 @@
   "(Settings, App)"; no tests, code or file names.
 -->
 
+## 0.4.0 · 19 Nov 2026
+A one-click installer, Ctrl+, for Settings and tips the first time you need them; there's no portable version any more.
+
+### New
+- Ctrl+, opens Settings from anywhere in Couchbox, with the same PIN and kids rules as the profile menu (not while you're watching something).
+- Short tips pop up the first time you open + on a title and the first time you delete something, each with "Don't show this again".
+- Settings, App has a Hints list that shows every tip and brings back any you've turned off.
+
+### Improved
+- There's no portable version any more: the installer is the only download, and it keeps Couchbox up to date by itself.
+- The installer is now one click: it installs straight away, with no questions. Installing it over an earlier Couchbox keeps your settings, profiles and shortcuts.
+- Couchbox looks for updates as soon as it opens, then every 6 hours. When it starts hidden in the tray it looks too, and the update is waiting when you open it.
+- Couchbox can now only open files in your video folder and its own folders, which keeps it safer.
+
 ## 0.3.13 · 19 Nov 2026
 The + and a new cog give you My list, collections, resetting intros and deleting in one place.
 

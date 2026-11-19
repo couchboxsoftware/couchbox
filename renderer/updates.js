@@ -18,8 +18,7 @@ const Updates = (() => {
     if (st.status === 'available') {
       body = `<div class="ub-title"><span class="ub-icon">${arrow}</span>Update available: Couchbox ${esc(st.version)}</div>
         ${st.notes ? `<div class="ub-notes">${esc(st.notes)}</div>` : ''}
-        <div class="ub-actions"><button class="btn btn-sm btn-accent" data-ub="now">${st.portable ? 'Get the new version' : 'Update now'}</button><button class="btn btn-sm ub-later" data-ub="later">Later</button></div>
-        ${st.portable ? '<div class="ub-small">You\'re using the portable version, so this opens the download page.</div>' : ''}`;
+        <div class="ub-actions"><button class="btn btn-sm btn-accent" data-ub="now">Update now</button><button class="btn btn-sm ub-later" data-ub="later">Later</button></div>`;
     } else if (st.status === 'downloading') {
       body = `<div class="ub-title"><span class="ub-icon">${arrow}</span>Downloading Couchbox ${esc(st.version)}…</div>
         <div class="ub-progress"><div class="ub-bar"><i style="width:${st.percent || 0}%"></i></div><span>${st.percent || 0}%</span></div>`;
@@ -57,7 +56,7 @@ const Updates = (() => {
     const btn = st.status === 'waiting'
       ? '<button class="btn btn-sm btn-accent" data-ub="anyway">Update now anyway</button>'
       : st.status === 'available' || st.status === 'error'
-        ? `<button class="btn btn-sm btn-accent" data-ub="now">${st.portable ? 'Get the new version' : 'Update now'}</button>`
+        ? `<button class="btn btn-sm btn-accent" data-ub="now">Update now</button>`
         : `<button class="btn btn-sm btn-ghost" data-ub="check" ${st.status === 'off' || st.status === 'checking' || st.status === 'downloading' || st.status === 'ready' ? 'disabled' : ''}>Check for updates</button>`;
     box.innerHTML = `<p style="margin:0 0 10px;font-size:14px">Version ${esc(st.current || '')}. ${line}</p><div class="inline">${btn}</div>`;
   }

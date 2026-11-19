@@ -31,11 +31,13 @@ app.whenReady().then(async () => {
   const icon = await render(page(BRAND.tile(512)), 512, 512);
   fs.writeFileSync(path.join(build, 'icon.png'), icon.toPNG());
 
-  const word = (size) => `<span style="font:300 ${size}px 'Segoe UI Light','Segoe UI',sans-serif;letter-spacing:${size / 12}px;color:#eee">couch<b style="font-weight:400;color:${BRAND.orange}">box</b></span>`;
-  const half = (bg) => `<div style="flex:1;background:${bg};display:flex;flex-direction:column;justify-content:center;gap:26px;padding:0 30px">
+  // The wordmark in the standard's style (both halves bold, a little open, "box" in the accent),
+  // light on the dark half and dark on the light half.
+  const word = (size, ink) => `<span style="font:700 ${size}px 'Segoe UI',sans-serif;letter-spacing:0.8px;line-height:1;white-space:nowrap;color:${ink}">couch<b style="font-weight:700;color:${BRAND.orange}">box</b></span>`;
+  const half = (bg, ink) => `<div style="flex:1;background:${bg};display:flex;flex-direction:column;justify-content:center;gap:26px;padding:0 30px">
       <div style="display:flex;align-items:flex-end;gap:22px">${BRAND.tile(160)}${BRAND.tile(64)}${BRAND.tile(32)}${BRAND.tile(16)}</div>
-      <div style="display:flex;align-items:center;gap:12px"><svg viewBox="5 9 38 34" width="40" height="36">${BRAND.sofaPaths(BRAND.orange, 3)}</svg>${word(30)}</div></div>`;
-  const preview = await render(page(`<div style="display:flex;height:100vh">${half('#121212')}${half('#f2f2f2')}</div>`, '#000'), 820, 300);
+      <div style="display:flex;align-items:center;gap:12px"><svg viewBox="5 9 38 34" width="40" height="36">${BRAND.sofaPaths(BRAND.orange, 3)}</svg>${word(30, ink)}</div></div>`;
+  const preview = await render(page(`<div style="display:flex;height:100vh">${half('#121212', '#eee')}${half('#f2f2f2', '#141414')}</div>`, '#000'), 820, 300);
   fs.writeFileSync(path.join(build, 'icon-preview.png'), preview.toPNG());
 
   // Tray icons: the bare sofa, coloured by state. Idle is light grey on a dark taskbar and dark

@@ -1,6 +1,8 @@
 // Update test: serves a built installer from a local stand-in "release" server, runs the app
 // against it, and walks through the update banner. It stops just before installing, so nothing
-// gets installed on this computer.
+// gets installed on this computer. It also checks that Couchbox looks for an update as soon as
+// it opens (no waiting), and with COUCHBOX_UPDATE_HIDDEN=1 that it does so when it starts hidden
+// in the tray too, with the banner waiting when the window is opened.
 //
 // Usage: set COUCHBOX_UPDATE_DIR (a dist folder holding latest.yml + the Setup exe),
 // COUCHBOX_LIBRARY and COUCHBOX_SNAP_OUT, then: npx electron test/update-check.js
@@ -9,6 +11,8 @@ const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const { app } = require('electron');
+// The app:// scheme must be set up before the app is ready; main.js loads later here.
+require('../src/main/app-protocol.js').registerScheme();
 
 const dir = process.env.COUCHBOX_UPDATE_DIR;
 const out = process.env.COUCHBOX_SNAP_OUT;
@@ -21,6 +25,8 @@ process.env.COUCHBOX_DATA_DIR = dataDir;
 // COUCHBOX_UPDATE_WAIT=1: a conversion is running when the update finishes downloading, so it
 // must wait ("Will update when conversions finish") and install once the conversion is done.
 const WAIT = !!process.env.COUCHBOX_UPDATE_WAIT;
+const HIDDEN = !!process.env.COUCHBOX_UPDATE_HIDDEN;
+if (HIDDEN) process.argv.push('--background');
 let library = process.env.COUCHBOX_LIBRARY;
 if (WAIT) {
   library = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-upd-lib-'));
@@ -41,6 +47,7 @@ const served = [];
 const server = http.createServer((req, res) => {
   const name = decodeURIComponent(req.url.split('?')[0].replace(/^\//, ''));
   served.push(name);
+  if (name === 'latest.yml' && !firstCheckAt) firstCheckAt = Date.now();
   const file = path.join(dir, name);
   if (name === 'latest.yml') {
     let yml = fs.readFileSync(file, 'utf8').replace(/^version: .*$/m, `version: ${FAKE_VERSION}`);
@@ -66,6 +73,12 @@ const server = http.createServer((req, res) => {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const errors = [];
 let installCalls = 0;
+let firstCheckAt = 0;
+let failed = 0;
+const check = (name, ok, detail = '') => {
+  if (!ok) failed++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail !== '' ? '  -- ' + detail : ''}`);
+};
 
 server.listen(0, '127.0.0.1', () => {
   process.env.COUCHBOX_UPDATE_URL = `http://127.0.0.1:${server.address().port}/`;
@@ -100,8 +113,20 @@ server.listen(0, '127.0.0.1', () => {
         throw new Error('timed out waiting for ' + label);
       };
       try {
+        if (HIDDEN) {
+          // Started hidden: it still checks, and the banner is there when the window is opened.
+          await until('update banner', `!document.getElementById('update-banner').hidden`);
+          check('started hidden, it checks for an update without being opened', !!firstCheckAt && !win.isVisible());
+          win.show();
+          await wait(500);
+          check('...and the banner is waiting when it is opened', win.isVisible() && (await js(`/Update available/.test(document.getElementById('update-banner').innerText)`)));
+          await snap('25-update-after-tray');
+          return finish();
+        }
         for (let i = 0; i < 100 && !win.isVisible(); i++) await wait(100);
+        const shownAt = Date.now();
         await until('update banner', `!document.getElementById('update-banner').hidden`);
+        check('it checks for an update as soon as it opens', !!firstCheckAt && firstCheckAt - shownAt < 3000, firstCheckAt ? (firstCheckAt - shownAt) + ' ms after the window showed' : 'never asked');
         console.log('banner says:', await js(`document.getElementById('update-banner').innerText.replace(/\\s+/g,' ')`));
         await snap('20-update-available');
 
@@ -131,15 +156,21 @@ server.listen(0, '127.0.0.1', () => {
         await snap('22-update-ready');
         await wait(1800);
         console.log('install would run:', installCalls === 1 ? 'yes' : 'NO (' + installCalls + ')');
+        check('Update now downloads it and would restart into it', installCalls === 1);
       } catch (e) {
+        failed++;
         console.error('UPDATE TEST FAILED', e.message);
         console.log('banner now:', await js(`document.getElementById('update-banner').innerText`).catch(() => '?'));
       }
+      finish();
+    });
+    function finish() {
       console.log('files requested:', [...new Set(served)].join(', '));
       console.log('console errors/warnings:', errors.length ? '\n' + errors.join('\n') : 'none');
+      console.log(`\n${failed ? failed + ' failed' : 'all passed'}`);
       server.close();
-      app.exit(0);
-    });
+      app.exit(failed ? 1 : 0);
+    }
   });
 
   require('../main.js');

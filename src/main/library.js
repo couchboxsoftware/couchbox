@@ -2,14 +2,14 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { pathToFileURL } = require('url');
+const { mediaUrl } = require('./app-protocol');
 const { scanLibrary } = require('./scanner');
 const media = require('./media');
 const { Tmdb } = require('./tmdb');
 const { findMatch, MATCHER_VERSION } = require('./matcher');
 const { JsonStore } = require('./store');
 
-const url = (p) => (p ? pathToFileURL(p).href : null);
+const url = (p) => mediaUrl(p); // app://couchbox/media/… (only the video and data folders are served)
 
 // The deepest folder all these folders share.
 function commonDir(dirs) {

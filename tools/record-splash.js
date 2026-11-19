@@ -6,6 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
+const appProtocol = require('../src/main/app-protocol'); // the splash loads through app://, as in the app
+appProtocol.registerScheme();
 const ffmpeg = require('ffmpeg-static');
 
 const FPS = 30;
@@ -15,6 +17,7 @@ const frames = fs.mkdtempSync(path.join(os.tmpdir(), 'couchbox-frames-'));
 
 app.on('window-all-closed', () => {});
 app.whenReady().then(async () => {
+  appProtocol.handle({ appRoot: path.join(__dirname, '..'), mediaRoots: () => [] });
   const win = new BrowserWindow({ width: 640, height: 360, show: false, frame: false, useContentSize: true, webPreferences: { offscreen: true } });
   win.webContents.setFrameRate(FPS);
   // Paint the stand-in desktop colour before the page's own animations start.
@@ -24,7 +27,7 @@ app.whenReady().then(async () => {
   win.webContents.on('paint', (_e, _dirty, img) => { latest = img; });
   await new Promise((resolve) => {
     win.webContents.once('did-finish-load', resolve);
-    win.loadFile(path.join(__dirname, '..', 'renderer', 'splash.html')).catch(() => {});
+    win.loadURL(appProtocol.pageUrl('renderer/splash.html')).catch(() => {});
   });
 
   // Sample at a fixed rate so the clip plays at real speed; fake the app's loading steps.

@@ -1,5 +1,5 @@
 // Reads CHANGELOG.md (every version and what it added) into entries for the app's What's new,
-// and checks each entry follows the template. Also used by tools/release-notes.js.
+// and checks each entry follows the template. Also used by tools/release.js.
 const fs = require('fs');
 const path = require('path');
 
