@@ -175,9 +175,9 @@ const Conv = (() => {
       ? `<h4>Skipped</h4><p class="conv-note">Kept as they are, so they may not play here.</p>${st.skipped.map((r) => `<div class="conv-row"><span class="cr-name">${esc(r.label)}</span><button class="btn btn-sm btn-ghost" data-act="conv-retry" data-file="${esc(r.id)}">Convert</button></div>`).join('')}`
       : '';
     const bin = st.bin.length
-      ? `<h4>Bin</h4><p class="conv-note">${plural(st.bin.length, 'original', 'originals')}, ${fmtSize(st.binSize)}. Each is deleted once its new copy has been watched, or after 7 days.</p>
+      ? `<h4>Bin</h4><p class="conv-note">${plural(st.bin.length, 'item', 'items')}, ${fmtSize(st.binSize)}. Each is deleted for good after 7 days (an original once its new copy has been watched). Until then it can be put back.</p>
          <div class="inline"><button class="btn btn-sm btn-ghost" data-act="conv-open-bin">Open bin</button><button class="btn btn-sm btn-ghost" data-act="conv-empty-bin">Empty now</button></div>
-         ${st.bin.map((b) => `<div class="conv-row"><span class="cr-name">${esc(b.label)}<small>Deleted ${esc(fmtDay(b.deleteAt))}</small></span>${b.kind === 'copy'
+         ${st.bin.map((b) => `<div class="conv-row"><span class="cr-name">${esc(b.label)}<small>Deleted ${esc(fmtDay(b.deleteAt))}</small></span>${b.kind === 'copy' || b.kind === 'deleted'
            ? `<button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="copy">Restore</button>`
            : `<button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="retry">Restore and retry</button><button class="btn btn-sm btn-ghost" data-act="conv-restore" data-key="${esc(b.key)}" data-mode="skip">Restore and skip</button>`}</div>`).join('')}`
       : '';
@@ -273,7 +273,7 @@ const Conv = (() => {
         renderSection();
         return true;
       case 'conv-empty-bin':
-        if (!confirm('Delete every original in the bin now? This can\'t be undone.')) return true;
+        if (!confirm('Delete everything in the bin now? This can\'t be undone.')) return true;
         const err = await cb.convEmptyBin();
         toast(err || 'Bin emptied', err ? 5000 : 3000);
         return true;

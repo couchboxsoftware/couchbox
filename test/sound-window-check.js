@@ -80,9 +80,10 @@ app.on('browser-window-created', (_e, win) => {
         await wait(500);
         check('opening a title plays a tap', (await taps()) === n + 1);
         n = await taps();
-        await js(`document.querySelector('[data-act="list"]') && document.querySelector('[data-act="list"]').click()`);
+        await js(`document.querySelector('.details [data-act="menu-plus"]').click()`);
         await wait(400);
-        check('My list button plays a tap', (await taps()) === n + 1);
+        check('the + (My list and collections) button plays a tap', (await taps()) === n + 1);
+        await js(`Menus.close()`);
         n = await taps();
         await js(`document.querySelector('.details [data-act="play"], [data-act="play"]').click()`);
         await wait(1500);

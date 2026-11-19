@@ -20,6 +20,17 @@
   "(Settings, App)"; no tests, code or file names.
 -->
 
+## 0.3.13 · 19 Nov 2026
+The + and a new cog give you My list, collections, resetting intros and deleting in one place.
+
+### New
+- A cog on every title's card and page: Reset intro skips (a series, or one season) finds Skip intro again from scratch.
+- Delete from Couchbox, in the same cog, deletes a film, a whole series, a season or one episode (grown-up profiles only). It shows what goes and asks you to type DELETE, then the files and their subtitles go to the bin for 7 days, where Restore puts them back (Settings, Playback).
+
+### Improved
+- The + is now one menu for My list and your collections: tick each on or off, or make a new collection, without leaving the card.
+- Each episode has the same + for collections, and a cog to delete it.
+
 ## 0.3.12 · 16 Nov 2026
 Make your own collections of films, series, seasons and episodes.
 

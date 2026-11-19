@@ -779,3 +779,25 @@ button.chip:hover { border-color: #888; color: var(--text); }
 .toast.has-act { pointer-events: auto; display: flex; align-items: center; gap: 16px; }
 .toast-act { color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; font-size: 13px; }
 .toast-act:hover { text-decoration: underline; }
+
+/* ---------- the + and cog menus (menus.js) ---------- */
+.tmenu { position: fixed; z-index: 160; min-width: 220px; max-width: 320px; max-height: 60vh; overflow-y: auto; background: #242424; border-radius: 6px; padding: 5px 0; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); animation: fade 0.12s; }
+.tm-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 14px; text-align: left; font-size: 14px; color: var(--text); }
+.tm-item:hover, .tm-item:focus-visible { background: #333; }
+.tm-item > svg { width: 17px; height: 17px; color: var(--text-2); flex: none; }
+.tm-item > span:not(.tm-tick) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-tick { width: 18px; height: 18px; flex: none; color: var(--good); display: flex; align-items: center; justify-content: center; }
+.tm-tick svg { width: 17px; height: 17px; }
+.tm-head { padding: 6px 14px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-3); }
+.tm-sep { height: 1px; background: #383838; margin: 5px 0; }
+.tm-accent, .tm-accent > svg { color: var(--accent); }
+.tm-danger, .tm-danger > svg { color: #ff7a6b; }
+.round.on { border-color: #fff; background: rgba(80, 80, 80, 0.8); }
+.ep-add.on { opacity: 1; border-color: #fff; color: #fff; }
+#menu-layer:empty { display: none; }
+#menu-layer .pin-overlay { z-index: 170; }
+.dl-type { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text-2); }
+.dl-type .input { font-weight: 700; letter-spacing: 2px; }
+.btn-danger { background: #c0392b; color: #fff; }
+.btn-danger:hover { background: #d64535; }
+.btn-danger:disabled { opacity: 0.4; cursor: default; }

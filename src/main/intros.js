@@ -328,6 +328,30 @@ class Intros {
     this.send('intros', this.view());
   }
 
+  // "Reset intro skips" (the cog menu): forgets everything about a series' intros, or one
+  // season's (season = its number, or null for all), so they're found again from scratch:
+  // found intros, Yes/No answers, stretches marked wrong and the season's confirmed reference.
+  // Fingerprints are kept (they only depend on the files). Returns the seasons reset.
+  reset(seriesId, season = null) {
+    const d = this.store.data;
+    const s = this.lib().scan.series.find((x) => x.id === seriesId);
+    let n = 0;
+    for (const key of Object.keys(d.introSeasons)) {
+      const [sid, num] = key.split('|');
+      if (sid === seriesId && (season == null || Number(num) === season)) {
+        delete d.introSeasons[key];
+        n++;
+      }
+    }
+    for (const e of (s ? s.episodes : []).filter((e) => season == null || e.season === season)) {
+      for (const k of ['introEpisodes', 'introChecked', 'introRejects']) delete d[k][e.id];
+    }
+    this.store.save();
+    this.announce();
+    this.schedule();
+    return n;
+  }
+
   // Ids move when a file is renamed (conversion, tidying): its intro data goes with it.
   migrate(oldId, newId) {
     const d = this.store.data;

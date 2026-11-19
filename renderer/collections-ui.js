@@ -170,6 +170,7 @@ const Coll = (() => {
       open.query = q.value;
       const t = q.value.trim().toLowerCase();
       const box = $('#cp-results');
+      if (!box) return; // the page closed while the search was waiting
       if (!t) return (box.innerHTML = '');
       const have = new Set(c.items.map(keyOf));
       const hits = visible().filter((i) => i.title.toLowerCase().includes(t)).sort((a, b) => (b.title.toLowerCase().startsWith(t) - a.title.toLowerCase().startsWith(t)) || a.title.localeCompare(b.title)).slice(0, 8);
@@ -367,8 +368,20 @@ const Coll = (() => {
     document.addEventListener('keydown', onKey, true);
   }
 
-  // "New collection" (Collections tab): asks for a name, then opens it in Edit.
-  function createNew() {
+  // The + menu (menus.js): ticks a title in or out of one of your collections.
+  async function toggleItem(cid, it) {
+    const c = find(cid);
+    if (!c) return;
+    const k = keyOf(it);
+    if (c.items.some((x) => keyOf(x) === k)) await save(cb.collectionRemoveItem(S.profile.id, cid, k));
+    else await save(cb.collectionAdd(S.profile.id, cid, it));
+  }
+  // The + menu's New collection: makes it with this title in it.
+  const createWith = (it) => createNew(it);
+
+  // "New collection": asks for a name, then opens it in Edit (from the Collections tab), or
+  // puts `withItem` in it (from the + menu).
+  function createNew(withItem = null) {
     closePicker();
     ensureLayer().innerHTML = `<div class="pin-overlay"><div class="pin-window cpk" role="dialog" aria-label="New collection">
       <h2 class="pin-title">New collection</h2><p class="pin-note">Films, series, seasons or episodes, in any mix.</p>
@@ -385,7 +398,9 @@ const Coll = (() => {
       const r = await save(cb.collectionCreate(S.profile.id, name));
       if (!r) return;
       closePicker();
-      openPage(r.id, true);
+      if (!withItem) return openPage(r.id, true);
+      await save(cb.collectionAdd(S.profile.id, r.id, withItem));
+      toast(`Added to ${name}`, 2200);
     };
     $('#cpk-make', L).onclick = go;
     $('#cpk-cancel', L).onclick = closePicker;
@@ -455,5 +470,5 @@ const Coll = (() => {
     S.collections = S.profile ? await cb.collectionsGet(S.profile.id) : [];
   }
 
-  return { keyOf, itemsOf, forTab, cardHTML, rowHTML, pageHTML, inLine, openPage, renderPage, isOpen, afterClose, pick, act, load, closePicker };
+  return { keyOf, itemsOf, forTab, cardHTML, rowHTML, pageHTML, inLine, openPage, renderPage, isOpen, afterClose, pick, act, load, closePicker, toggleItem, createWith, mineList: mine };
 })();

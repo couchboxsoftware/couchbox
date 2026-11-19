@@ -769,8 +769,7 @@ function showHover(card) {
     <div class="hc-body">
       <div class="hc-actions">
         <button class="round solid" data-act="play" data-id="${esc(item.id)}" aria-label="Play">${ICON.play}</button>
-        <button class="round" data-act="list" data-id="${esc(item.id)}" aria-label="${inList ? 'Remove from My list' : 'Add to My list'}" title="${inList ? 'Remove from My list' : 'Add to My list'}">${inList ? ICON.check : ICON.plus}</button>
-        <button class="round" data-act="coll-add" data-id="${esc(item.id)}" aria-label="Add to collection" title="Add to collection">${ICON.collection}</button>
+        ${Menus.buttonsHTML(item)}
         ${card.closest('[data-row="cw"]') ? `<button class="round" data-act="cw-hide" data-id="${esc(item.id)}" aria-label="Remove from Continue watching" title="Remove from Continue watching">${ICON.x}</button>` : ''}
         <span class="spacer"></span>
         <button class="round" data-act="open" data-id="${esc(item.id)}" aria-label="More info" title="More info">${ICON.down}</button>
@@ -804,6 +803,7 @@ function showHover(card) {
   }
 }
 function hideHover() {
+  if (typeof Menus !== 'undefined' && Menus.holdsHover()) return; // its + or cog menu is open
   clearTimeout(hoverTimer);
   clearTimeout(hoverVideoTimer);
   const hc = $('#hovercard');
@@ -844,7 +844,7 @@ function episodeRowHTML(e, label, series) {
     <div class="ep-thumb">${e.still ? `<img src="${e.still}" loading="lazy" alt="" />` : ''}${DL.overlay(e.id) || Conv.overlay(e.id)}<div class="playov"><span>${ICON.play}</span></div>${pct > 0 ? `<div class="pbar"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}</div>
     <div><div class="ep-title"><span>${label ? label + ' · ' : ''}${esc(e.title)}${Copies.lengthSuffix(e.id)}</span>${(S.copies && S.copies.versionOf[e.id]) ? Copies.cardBits(e.id) : ''}${DL.episodeTag(e) || (series ? Conv.episodeTag(e, series) : '')}<small>${e.duration ? fmtDuration(e.duration) : ''}</small></div>
     <p class="ep-ov">${esc(e.overview || (watched ? 'Watched' : p && p.t > 10 ? fmtDuration(p.d - p.t) + ' left' : ''))}</p></div>
-    <div class="ep-btns"><button class="ep-add" data-act="coll-add-ep" data-file="${esc(e.id)}" title="Add to collection" aria-label="Add to collection">${ICON.collection}</button>
+    <div class="ep-btns">${Menus.episodeButtonsHTML(e)}
     <button class="ep-mark ${watched ? 'on' : ''}" data-act="mark" data-file="${esc(e.id)}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${ICON.check}</button></div>
   </div>`;
 }
@@ -892,9 +892,8 @@ function renderDetails() {
         <div class="d-actions">
           ${pieShown ? DL.pie(dlFile) : `<button class="btn btn-light" data-act="play" data-id="${esc(item.id)}">${ICON.play}${esc(info ? info.label : 'Play')}</button>`}
           ${info && info.pct > 0 ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="restart" data-id="${esc(item.id)}">Start over</button>` : ''}
-          <button class="round" data-act="list" data-id="${esc(item.id)}" title="${inList ? 'Remove from My list' : 'Add to My list'}" aria-label="${inList ? 'Remove from My list' : 'Add to My list'}">${inList ? ICON.check : ICON.plus}</button>
+          ${Menus.buttonsHTML(item)}
           ${fileItem ? `<button class="round" data-act="mark" data-file="${esc(item.id)}" title="${isWatched(S.progress[item.id]) ? 'Mark as unwatched' : 'Mark as watched'}" aria-label="Toggle watched" style="${isWatched(S.progress[item.id]) ? 'background:var(--good);border-color:var(--good)' : ''}">${ICON.check}</button>` : ''}
-          <button class="round" data-act="coll-add" data-id="${esc(item.id)}" title="Add to collection" aria-label="Add to collection">${ICON.collection}</button>
           ${continueWatching(null).some((x) => x.item.id === item.id) ? `<button class="btn btn-grey btn-sm" style="height:44px" data-act="cw-hide" data-id="${esc(item.id)}">${ICON.x}Remove from Continue watching</button>` : ''}
         </div>
       </div>
@@ -1200,6 +1199,10 @@ document.addEventListener('click', async (e) => {
     return Coll.act(act, el);
   }
   if (act === 'cw-hide') return hideFromCw(id);
+  if (act.startsWith('menu-')) {
+    e.stopPropagation();
+    return Menus.act(act, el);
+  }
   if (act.startsWith('copy-') || act.startsWith('version-')) {
     e.stopPropagation();
     return Copies.act(act, el);

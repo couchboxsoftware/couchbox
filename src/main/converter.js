@@ -462,16 +462,21 @@ class Converter {
 
   // Deletes a binned original. Returns false if Windows won't let it go (it's kept for next time).
   deleteBinned(b) {
-    try {
-      // Downloaded videos are often marked read-only, which stops Windows deleting them.
-      if (fs.existsSync(b.binPath)) fs.chmodSync(b.binPath, 0o666);
-      fs.rmSync(b.binPath, { force: true });
-    } catch (e) {
-      console.error('[converter] could not delete', b.binPath, e.message);
-      return false;
+    const paths = b.files ? b.files.map((f) => f.binPath) : [b.binPath]; // a deleted title: several files
+    let ok = true;
+    for (const p of paths) {
+      try {
+        // Downloaded videos are often marked read-only, which stops Windows deleting them.
+        if (fs.existsSync(p)) fs.chmodSync(p, 0o666);
+        fs.rmSync(p, { force: true });
+        pruneEmpty(p);
+      } catch (e) {
+        console.error('[converter] could not delete', p, e.message);
+        ok = false;
+      }
     }
-    pruneEmpty(b.binPath);
-    return true;
+    if (!ok && b.files) b.files = b.files.filter((f) => fs.existsSync(f.binPath)); // try the rest again later
+    return ok;
   }
 
   // Returns a message if some couldn't be deleted, or ''.
@@ -488,6 +493,35 @@ class Converter {
     const st = this.state.data;
     const b = st.bin.find((x) => x.binPath === binPath);
     if (!b) return 'That original is no longer in the bin.';
+    // A title deleted with "Delete from Couchbox": every file (videos and subtitles) goes back.
+    if (b.kind === 'deleted') {
+      const files = (b.files || []).filter((f) => fs.existsSync(f.binPath));
+      if (!files.length) {
+        st.bin = st.bin.filter((x) => x !== b);
+        this.state.save();
+        this.snapshot();
+        return 'Those files have already been deleted.';
+      }
+      const clash = files.find((f) => fs.existsSync(f.orig));
+      if (clash) return `Couldn't put it back: there's already a file called ${path.basename(clash.orig)} there.`;
+      const back = [];
+      try {
+        for (const f of files) {
+          fs.mkdirSync(path.dirname(f.orig), { recursive: true });
+          fs.renameSync(f.binPath, f.orig);
+          back.push(f);
+        }
+      } catch (e) {
+        for (const f of back.reverse()) try { fs.renameSync(f.orig, f.binPath); } catch (_) {}
+        return "Couldn't put it back: " + e.message;
+      }
+      st.bin = st.bin.filter((x) => x !== b);
+      this.state.save();
+      for (const f of files) pruneEmpty(f.binPath);
+      this.lib().refresh();
+      this.snapshot();
+      return '';
+    }
     if (!fs.existsSync(b.binPath)) {
       st.bin = st.bin.filter((x) => x !== b);
       this.state.save();
@@ -559,6 +593,41 @@ class Converter {
       return "Couldn't move it to the bin: " + e.message;
     }
     this.state.data.bin.push({ kind: 'copy', orig: file, binPath, newPath: null, oldId: null, newId: null, label, size, binnedAt: Date.now() });
+    this.state.save();
+    this.lib().refresh();
+    this.snapshot();
+    return '';
+  }
+
+  // "Delete from Couchbox" (the cog menu): moves videos and their subtitles into the bin as one
+  // entry, deleted after 7 days and restorable until then (Settings, Library). files: paths.
+  // Returns a problem in words, or ''.
+  binDelete(files, label) {
+    const root = this.root();
+    if (!root) return 'Choose a Couchbox folder first.';
+    const binRoot = path.join(root, BIN);
+    const moved = [];
+    let size = 0;
+    for (const file of files) {
+      if (!fs.existsSync(file)) continue;
+      if (this.running.size) for (const j of this.running.values()) if (j.file === file) this.cancelPath(file);
+      let binPath = path.join(binRoot, path.relative(root, file));
+      for (let n = 2; fs.existsSync(binPath); n++) binPath = path.join(path.dirname(binPath), `${path.basename(file, path.extname(file))} (${n})${path.extname(file)}`);
+      try {
+        size += fs.statSync(file).size;
+        fs.mkdirSync(path.dirname(binPath), { recursive: true });
+        hide(binRoot);
+        fs.renameSync(file, binPath);
+        moved.push({ orig: file, binPath });
+      } catch (e) {
+        // Put back what already moved, so nothing is left half-deleted.
+        for (const m of moved.reverse()) try { fs.renameSync(m.binPath, m.orig); } catch (_) {}
+        return "Couldn't move it to the bin: " + e.message;
+      }
+    }
+    if (!moved.length) return 'Those files have already gone.';
+    // The entry's binPath is its first file (the key Settings uses); `files` holds them all.
+    this.state.data.bin.push({ kind: 'deleted', orig: moved[0].orig, binPath: moved[0].binPath, files: moved, newPath: null, oldId: null, newId: null, label, size, binnedAt: Date.now() });
     this.state.save();
     this.lib().refresh();
     this.snapshot();

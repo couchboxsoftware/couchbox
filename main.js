@@ -691,6 +691,59 @@ ipcMain.handle('list:toggle', (_e, pid, itemId) => {
 // Intros found automatically (intros.js): Yes and No after a Skip.
 ipcMain.handle('intros:confirm', (_e, episodeId) => intros.confirm(episodeId));
 ipcMain.handle('intros:reject', (_e, episodeId, old, answers) => intros.reject(episodeId, old, answers));
+// The cog menu's "Reset intro skips": a whole series (season null) or one season.
+ipcMain.handle('intros:reset', (_e, seriesId, season) => intros.reset(seriesId, season == null ? null : Number(season)));
+
+/* ---------- Delete from Couchbox (the cog menu) ---------- */
+// target: { kind: 'film' | 'series' | 'season' | 'episode', id, season? }. Works out the files
+// (videos and their subtitles) and a label, or says why it can't. Grown-up profiles only.
+function deleteTarget(pid, t) {
+  const p = (store.data.profiles || []).find((x) => x.id === pid);
+  if (!p || p.kids) return { error: 'Only grown-up profiles can delete.' };
+  const titles = library.meta.data.titles;
+  const nameOf = (it) => (titles[it.id] && titles[it.id].title) || it.title;
+  let label;
+  let items = [];
+  if (t && t.kind === 'film') {
+    const f = library.findItem(t.id);
+    if (!f || f.kind !== 'film') return { error: 'That film has already gone.' };
+    const year = (titles[f.id] && titles[f.id].year) || f.year;
+    label = nameOf(f) + (year ? ` (${year})` : '');
+    items = [f];
+  } else if (t && (t.kind === 'series' || t.kind === 'season')) {
+    const s = library.scan.series.find((x) => x.id === t.id);
+    if (!s) return { error: 'That series has already gone.' };
+    items = s.episodes.filter((e) => t.kind === 'series' || e.season === Number(t.season));
+    if (!items.length) return { error: 'That season has already gone.' };
+    const n = `${items.length} episode${items.length === 1 ? '' : 's'}`;
+    label = t.kind === 'series' ? `${nameOf(s)} (${n})` : `${nameOf(s)} · ${Number(t.season) === 0 ? 'Specials' : 'Season ' + t.season} (${n})`;
+  } else if (t && t.kind === 'episode') {
+    const e = library.findFile(t.id);
+    const s = e && library.scan.series.find((x) => x.episodes.includes(e));
+    if (!e || !s) return { error: 'That episode has already gone.' };
+    label = `${nameOf(s)} · S${e.season}:E${e.episode}`;
+    items = [e];
+  } else return { error: "That can't be deleted." };
+  if (items.some((f) => converter.playing === f.id)) return { error: "It's playing. Close the video first." };
+  if (items.some((f) => f.partial || (downloads && downloads.active(f.file)))) return { error: "It's still downloading. Try again once it's finished." };
+  const subs = items.flatMap((f) => (f.subs || []).map((x) => x.file));
+  const files = [...items.map((f) => f.file), ...subs];
+  let size = 0;
+  for (const f of files) try { size += fs.statSync(f).size; } catch (_) {}
+  return { label, count: items.length, subs: subs.length, size, files };
+}
+ipcMain.handle('title:delete-info', (_e, pid, target) => {
+  const r = deleteTarget(pid, target);
+  if (r.error) return r;
+  const { files, ...info } = r;
+  return info;
+});
+ipcMain.handle('title:delete', (_e, pid, target) => {
+  const r = deleteTarget(pid, target);
+  if (r.error) return r;
+  const err = converter.binDelete(r.files, `${r.label} (deleted)`);
+  return err ? { error: err } : { ok: true, label: r.label };
+});
 
 ipcMain.handle('subtitle', (_e, fileId, index) => library.subtitle(fileId, index));
 /* ---------- conversions ---------- */

@@ -133,8 +133,9 @@ app.on('browser-window-created', (_e, win) => {
 
       // Edit's search adds titles.
       const search = async (text) => {
-        await js(`(() => { const q = document.getElementById('cp-q'); q.value = ${JSON.stringify(text)}; q.dispatchEvent(new Event('input')); })()`);
-        await wait(400);
+        await js(`(() => { const q = document.getElementById('cp-q'); document.getElementById('cp-results').innerHTML = ''; q.value = ${JSON.stringify(text)}; q.dispatchEvent(new Event('input')); })()`);
+        await until(`!!document.querySelector('#cp-results').children.length`, 5000); // the search waits until typing stops
+        await wait(150);
       };
       await search('night');
       check('Edit: searching finds a title', await hasData('#cp-results [data-act="coll-search-add"]', 'id', ids.night));
@@ -149,8 +150,9 @@ app.on('browser-window-created', (_e, win) => {
       // A title's page: Add to collection.
       await js(`openDetails(${JSON.stringify(ids.paper)})`);
       await wait(500);
-      check("a title's page has Add to collection", await has('#modal-root .details [data-act="coll-add"]'));
-      await click('#modal-root .details [data-act="coll-add"]');
+      check("a title's page has the + menu", await has('#modal-root .details [data-act="menu-plus"]'));
+      await js(`Coll.pick({ kind: 'film', id: ${JSON.stringify(ids.paper)} })`); // the collections window (as before)
+      await wait(350);
       check('...it lists your collections, unticked', (await has('#coll-layer .cpk-row')) && !(await js(`document.querySelector('#coll-layer [data-cid]').checked`)));
       check("...a film has no whole/season/episodes choice", !(await has('#coll-layer .cpk-scope')));
       await tick('Weekend');
@@ -167,7 +169,9 @@ app.on('browser-window-created', (_e, win) => {
       // A series' page: the whole series, or one season.
       await js(`closeModal(); openDetails(${JSON.stringify(ids.coast)}, 2)`);
       await wait(500);
-      await click('#modal-root .details [data-act="coll-add"]');
+      await click('#modal-root .details [data-act="menu-plus"]');
+      await js(`[...document.querySelectorAll('.tmenu .tm-item')].find((x) => x.textContent.startsWith('A season or some episodes')).click()`);
+      await wait(400);
       check("a series' page: whole series, one season or some episodes", (await js(`document.querySelectorAll('#coll-layer input[name="cpk-scope"]').length`)) === 3);
       await tick('Coast');
       await js(`(() => { const r = document.querySelector('#coll-layer input[name="cpk-scope"][value="season"]'); r.checked = true; r.dispatchEvent(new Event('change')); })()`);
@@ -183,12 +187,13 @@ app.on('browser-window-created', (_e, win) => {
       await js(`closeModal(); openDetails(${JSON.stringify(ids.coast)}, 1)`);
       await wait(500);
       const e2 = await epId(1, 2);
-      check('each episode row has an Add to collection button', await hasData('#modal-root .ep [data-act="coll-add-ep"]', 'file', e2));
-      await clickData('#modal-root .ep [data-act="coll-add-ep"]', 'file', e2, 0);
+      check('each episode row has a + button', await hasData('#modal-root .ep [data-act="menu-plus-ep"]', 'file', e2));
+      await clickData('#modal-root .ep [data-act="menu-plus-ep"]', 'file', e2, 0);
       await wait(400);
-      check("...it doesn't start the episode", !(await js(`Player.isOpen()`)) && (await has('#coll-layer .cpk')));
-      await tick('Weekend');
-      await click('#cpk-done');
+      check("...it doesn't start the episode", !(await js(`Player.isOpen()`)) && (await has('.tmenu')));
+      await js(`[...document.querySelectorAll('.tmenu .tm-item')].find((x) => x.textContent.trim() === 'Weekend').click()`);
+      await wait(500);
+      await js(`Menus.close()`);
       await js(`closeModal()`);
 
       // The hover card's +.
@@ -196,18 +201,20 @@ app.on('browser-window-created', (_e, win) => {
       await wait(400);
       await js(`showHover(${findData('.row[data-row="films"] .card', 'id', ids.night)})`);
       await wait(300);
-      check('the hover card has Add to collection', await has('#hovercard [data-act="coll-add"]'));
-      await click('#hovercard [data-act="coll-add"]');
+      check('the hover card has the + menu', await has('#hovercard [data-act="menu-plus"]'));
+      await click('#hovercard [data-act="menu-plus"]');
+      await js(`[...document.querySelectorAll('.tmenu .tm-item')].find((x) => x.textContent.trim() === 'New collection').click()`);
+      await wait(300);
       await js(`document.querySelector('#cpk-name').value = 'Half'`);
-      await click('#cpk-create', 800);
-      await click('#cpk-done');
+      await click('#cpk-make', 800);
       const e1 = await epId(1, 1);
       await js(`openDetails(${JSON.stringify(ids.coast)}, 1)`);
       await wait(400);
-      await clickData('#modal-root .ep [data-act="coll-add-ep"]', 'file', e1, 0);
+      await clickData('#modal-root .ep [data-act="menu-plus-ep"]', 'file', e1, 0);
       await wait(400);
-      await tick('Half');
-      await click('#cpk-done');
+      await js(`[...document.querySelectorAll('.tmenu .tm-item')].find((x) => x.textContent.trim() === 'Half').click()`);
+      await wait(500);
+      await js(`Menus.close()`);
       await js(`closeModal()`);
 
       // The rows: Home all; Films / Series by the 50% rule.
@@ -260,8 +267,7 @@ app.on('browser-window-created', (_e, win) => {
       await clickData('#modal-root [data-act="coll-remove"]', 'key', `film:${ids.fern}`, 500);
       check('× removes a title from the collection (not from the library)', !(await keys()).includes(`film:${ids.fern}`) && !!(await id('Fernhill')));
       await click('[data-act="coll-search-add"]', 100); // nothing there: harmless
-      await js(`(() => { const q = document.getElementById('cp-q'); q.value = 'fern'; q.dispatchEvent(new Event('input')); })()`);
-      await wait(400);
+      await search('fern');
       await clickData('#cp-results [data-act="coll-search-add"]', 'id', ids.fern, 600);
       // Opening a title from the page, and back.
       await click('[data-act="coll-edit"]');
@@ -305,8 +311,7 @@ app.on('browser-window-created', (_e, win) => {
       await wait(300);
       await js(`document.querySelector('#cpk-name').value = 'Kim picks'`);
       await click('#cpk-make', 600);
-      await js(`(() => { const q = document.getElementById('cp-q'); q.value = 'n'; q.dispatchEvent(new Event('input')); })()`);
-      await wait(400);
+      await search('n');
       const kidHits = await js(`[...document.querySelectorAll('#cp-results [data-act="coll-search-add"]')].map((b) => b.dataset.id)`);
       check('kids can make their own, and search only finds kids-safe titles', kidHits.length === 1 && kidHits[0] === ids.fern, JSON.stringify(kidHits));
       await js(`closeModal()`);
